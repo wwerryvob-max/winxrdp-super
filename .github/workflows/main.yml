@@ -13,6 +13,7 @@ jobs:
         run: |
           # --- AUDIO & SESSION FIXES ---
           Set-Service -Name Audiosrv -StartupType Automatic
+          sc failure Audiosrv reset=86400 actions=restart/5000/restart/10000/restart/30000
           Start-Service -Name Audiosrv
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
@@ -248,3 +249,12 @@ jobs:
           }
           
           Write-Error "All $maxRetries attempts failed."
+
+      # 9. Auto-Restart Workflow
+      - name: 🔄 Auto-Restart Server
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering next workflow run to restart the server..."
+          gh workflow run main.yml --ref ${{ github.ref_name }}
