@@ -1,4 +1,4 @@
-name: RDP (Bore Stable + Apps + Discord + OBS + Captura)
+name: RDP + Python Environment (Pydroid-like)
 
 on:
   workflow_dispatch:
@@ -11,250 +11,305 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # --- AUDIO & SESSION FIXES ---
           Set-Service -Name Audiosrv -StartupType Automatic
           sc failure Audiosrv reset=86400 actions=restart/5000/restart/10000/restart/30000
           Start-Service -Name Audiosrv
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
-
-          # Enable clipboard sharing
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableClip" -Value 0 -Force
-
-          # Enable Remote Desktop (disable NLA for log-based interaction)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-
-          # Enable auto-reconnect on disconnect
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableAutoReconnect" -Value 1 -Force
-
-          # Firewall
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
-          # Auto-restart RDP service if it crashes
           sc failure TermService reset=86400 actions=restart/5000/restart/10000/restart/30000
-
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Secure Password
+      - name: Create RDP User
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
           if (-not $env:MY_SECRET_PASS) {
-              Write-Error "Secret 'PASS' is missing. Add it in Repository Settings."
-              exit 1
+            Write-Error "Secret 'PASS' is missing. Add it in Repository Settings > Secrets."
+            exit 1
           }
           $securePass = ConvertTo-SecureString $env:MY_SECRET_PASS -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          echo "RDP_CREDS=User: RDP | Password: (Hidden)" >> $env:GITHUB_ENV
+          Write-Host "RDP user created successfully."
 
       - name: Optimize System
         run: |
-          # High Performance power plan
           powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-
-          # Disable Windows Automatic Updates
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoUpdate" -Value 1 -Type DWord -Force
-
-          # Remove bloatware (preinstalled UWP apps)
-          $bloat = @(
-              '*xbox*', '*bing*', '*skype*', '*officehub*', '*zune*',
-              '*candycrush*', '*solitaire*', '*spotify*', '*netflix*',
-              '*disney*', '*tiktok*', '*facebook*', '*instagram*',
-              '*twitter*', '*pinterest*', '*minecraft*'
-          )
+          $bloat = @('*xbox*','*bing*','*skype*','*officehub*','*zune*','*candycrush*','*solitaire*','*spotify*','*netflix*','*disney*','*tiktok*','*facebook*','*instagram*','*twitter*','*pinterest*','*minecraft*')
           Get-AppxPackage -AllUsers | Where-Object {
-              $name = $_.Name
-              [bool]($bloat | Where-Object { $name -like $_ })
+            $name = $_.Name
+            [bool]($bloat | Where-Object { $name -like $_ })
           } | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
-
-          Write-Host "System optimization complete."
+          Write-Host "System optimized."
 
       - name: Install Apps
         run: |
-          Write-Host "Installing Apps..."
-          
-          # Install audio driver for screen recording
+          Write-Host "Installing apps via Chocolatey..."
           choco install vb-cable -y --no-progress --ignore-checksums --ignore-package-exit-codes
-          
-          # Bulk install (Choco handles locking internally — faster than sequential)
-          choco install googlechrome brave discord obs-studio ffmpeg captura vlc `
+          choco install googlechrome brave discord obs-studio ffmpeg vlc `
+            microsoft-windows-terminal python313 thonny `
             -y --no-progress --ignore-checksums --ignore-package-exit-codes
-          
-          # --- Fix Brave to Public ---
+
+          # Refresh PATH so python/pip are found immediately
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+          # Create scripts folder — drop your .py files here over RDP
+          New-Item -ItemType Directory -Path "C:\scripts" -Force | Out-Null
+
+          Write-Host "Apps installed."
+
+      - name: Install All Pip Packages
+        run: |
+          # Refresh PATH
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+          # Upgrade pip first
+          python -m pip install --upgrade pip
+
+          # Helper function — never crashes, just skips failed packages
+          function Install-Pip($pkg) {
+            Write-Host "Installing $pkg ..."
+            pip install $pkg 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "  [OK]   $pkg"
+            } else {
+              Write-Host "  [SKIP] $pkg  (not on PyPI or already built-in)"
+            }
+          }
+
+          # ---- Every single package from your original pipinstall.py ----
+
+          Install-Pip "OneClick"
+          Install-Pip "stdiomask"
+          Install-Pip "user-agent"
+          Install-Pip "instaloader"
+          Install-Pip "requests"
+          Install-Pip "rich"
+          Install-Pip "telebot"
+          Install-Pip "python-cfonts"
+          Install-Pip "pyfiglet"
+          Install-Pip "py_compile"
+          Install-Pip "socks"
+          Install-Pip "PySocks"
+          Install-Pip "youtube_dl"
+          Install-Pip "uuid"
+          Install-Pip "colorama"
+          Install-Pip "BeautifulSoup"
+          Install-Pip "pafy"
+          Install-Pip "bs4"
+          Install-Pip "argparse"
+          Install-Pip "InstagramAPI"
+          Install-Pip "uuid4"
+          Install-Pip "generate-user-agent"
+          Install-Pip "token_hex"
+          Install-Pip "Fore"
+          Install-Pip "re"
+          Install-Pip "selenium"
+          Install-Pip "webdriver-manager"
+          Install-Pip "asmix"
+          Install-Pip "curl2pyreqs"
+          Install-Pip "pycountry"
+          Install-Pip "ms4"
+          Install-Pip "Topython"
+          Install-Pip "fake_useragent"
+          Install-Pip "fake-useragent"
+          Install-Pip "mechaize"
+          Install-Pip "n"
+          Install-Pip "mm"
+          Install-Pip "new"
+          Install-Pip "sleep"
+          Install-Pip "b"
+          Install-Pip "string"
+          Install-Pip "secrets"
+          Install-Pip "webbrowser"
+          Install-Pip "hashlib"
+          Install-Pip "time"
+          Install-Pip "os"
+          Install-Pip "sys"
+          Install-Pip "json"
+          Install-Pip "random"
+          Install-Pip "datetime"
+          Install-Pip "threading"
+          Install-Pip "uuid"
+
+          Write-Host ""
+          Write-Host "===== Successfully installed packages ====="
+          pip list
+          Write-Host "==========================================="
+
+      - name: Create Desktop Shortcuts
+        run: |
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          $WshShell = New-Object -comObject WScript.Shell
+          $desktop = "C:\Users\Public\Desktop"
+
+          # Python Terminal → opens straight into C:\scripts
+          $lnk = $WshShell.CreateShortcut("$desktop\Python Terminal.lnk")
+          $lnk.TargetPath = "wt.exe"
+          $lnk.Arguments = "-d C:\scripts"
+          $lnk.Save()
+
+          # Thonny IDE (most like Pydroid 3)
+          $lnk2 = $WshShell.CreateShortcut("$desktop\Thonny.lnk")
+          $lnk2.TargetPath = "C:\Program Files\Thonny\thonny.exe"
+          $lnk2.Save()
+
+          # Brave Browser
           $BraveAdmin = "C:\Users\runneradmin\AppData\Local\BraveSoftware"
           if (Test-Path $BraveAdmin) {
-              Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
+            Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
           }
-          
-          # --- Fix Discord to Public ---
+          $lnk3 = $WshShell.CreateShortcut("$desktop\Brave.lnk")
+          $lnk3.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
+          $lnk3.Save()
+
+          # Discord
           $DiscordAdmin = "C:\Users\runneradmin\AppData\Local\Discord"
           if (Test-Path $DiscordAdmin) {
-              Copy-Item -Path $DiscordAdmin -Destination "C:\" -Recurse -Force
+            Copy-Item -Path $DiscordAdmin -Destination "C:\" -Recurse -Force
           }
-          
-          # --- Fix Captura ---
-          $CapLoc1 = "C:\Users\runneradmin\AppData\Local\Captura"
-          $CapLoc2 = "C:\ProgramData\chocolatey\lib\captura\tools"
-          if (Test-Path $CapLoc1) {
-              Copy-Item -Path $CapLoc1 -Destination "C:\" -Recurse -Force
-              Rename-Item -Path "C:\Captura" -NewName "Captura_App" -ErrorAction SilentlyContinue
-              Rename-Item -Path "C:\Captura_App" -NewName "Captura"
-          } elseif (Test-Path $CapLoc2) {
-              Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
-          }
-          
-          # --- Desktop Shortcuts ---
-          $WshShell = New-Object -comObject WScript.Shell
-          
-          $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
-          $BraveLnk.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
-          $BraveLnk.Save()
-          
-          $DiscordExe = Get-ChildItem -Path "C:\Discord" -Recurse -Filter "Discord.exe" | Select-Object -First 1
+          $DiscordExe = Get-ChildItem -Path "C:\Discord" -Recurse -Filter "Discord.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($DiscordExe) {
-              $DiscordLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Discord.lnk")
-              $DiscordLnk.TargetPath = $DiscordExe.FullName
-              $DiscordLnk.Save()
+            $lnk4 = $WshShell.CreateShortcut("$desktop\Discord.lnk")
+            $lnk4.TargetPath = $DiscordExe.FullName
+            $lnk4.Save()
           }
-          
-          $OBSLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\OBS Studio.lnk")
-          $OBSLnk.TargetPath = "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
-          $OBSLnk.WorkingDirectory = "C:\Program Files\obs-studio\bin\64bit"
-          $OBSLnk.Save()
-          
-          $CapturaLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Captura.lnk")
-          $CapturaLnk.TargetPath = "C:\Captura\Captura.exe"
-          $CapturaLnk.WorkingDirectory = "C:\Captura"
-          $CapturaLnk.Save()
-          
-          # --- Pre-made OBS Profile (720p, 30fps, ready to use) ---
-          $OBSProfDir = "$env:APPDATA\obs-studio\basic\profiles\RDP_Optimized"
+
+          # OBS Studio
+          $lnk5 = $WshShell.CreateShortcut("$desktop\OBS Studio.lnk")
+          $lnk5.TargetPath = "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
+          $lnk5.WorkingDirectory = "C:\Program Files\obs-studio\bin\64bit"
+          $lnk5.Save()
+
+          # OBS Profile (720p 30fps ready to use)
+          $OBSProfDir = "C:\Users\RDP\AppData\Roaming\obs-studio\basic\profiles\RDP_Optimized"
           New-Item -ItemType Directory -Path $OBSProfDir -Force | Out-Null
           @"
-          [General]
-          Name=RDP_Optimized
-          [Video]
-          BaseCX=1280
-          BaseCY=720
-          OutputCX=1280
-          OutputCY=720
-          FPSType=Common
-          FPSCommon=30
-          ScaleType=bicubic
-          [Output]
-          Mode=Simple
-          RecType=Standard
-          RecFmt=mp4
-          RecEncoder=amd
-          RecQuality=Small
-          RecRB=2500
-          AudioBitrate=128
-          [AdvOut]
-          RecTrack1=1
-          RecTrack2=2
-          "@ | Set-Content -Path "$OBSProfDir\basic.ini" -Encoding ASCII
-          
-          Write-Host "Installs, Shortcuts & OBS Profile Complete."
+[General]
+Name=RDP_Optimized
+[Video]
+BaseCX=1280
+BaseCY=720
+OutputCX=1280
+OutputCY=720
+FPSType=Common
+FPSCommon=30
+ScaleType=bicubic
+[Output]
+Mode=Simple
+RecType=Standard
+RecFmt=mp4
+RecEncoder=amd
+RecQuality=Small
+RecRB=2500
+AudioBitrate=128
+"@ | Set-Content -Path "$OBSProfDir\basic.ini" -Encoding ASCII
+
+          Write-Host "All desktop shortcuts created."
 
       - name: Create Website Shortcuts
         run: |
           $braveExe = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
           $desktop = "C:\Users\Public\Desktop"
           $sites = @(
-              @{Name="Cinevo"; Url="https://cinevo.site"},
-              @{Name="StreamEx"; Url="https://streamex.sh"},
-              @{Name="Mappl TV"; Url="https://mappl.tv/"},
-              @{Name="7Reels"; Url="https://7reels.cc/"},
-              @{Name="SkyFlixer"; Url="https://skyflixer.fun/"},
-              @{Name="1Flex"; Url="https://1flex.org"},
-              @{Name="RedFlix"; Url="https://redflix.co/"},
-              @{Name="Cinezo"; Url="https://cinezo.net/"},
-              @{Name="Discord"; Url="https://discord.com/app"}
+            @{Name="Cinevo";    Url="https://cinevo.site"},
+            @{Name="StreamEx";  Url="https://streamex.sh"},
+            @{Name="Mappl TV";  Url="https://mappl.tv/"},
+            @{Name="7Reels";    Url="https://7reels.cc/"},
+            @{Name="SkyFlixer"; Url="https://skyflixer.fun/"},
+            @{Name="1Flex";     Url="https://1flex.org"},
+            @{Name="RedFlix";   Url="https://redflix.co/"},
+            @{Name="Cinezo";    Url="https://cinezo.net/"},
+            @{Name="Discord";   Url="https://discord.com/app"}
           )
           $WshShell = New-Object -comObject WScript.Shell
           foreach ($site in $sites) {
-              $lnk = $WshShell.CreateShortcut("$desktop\$($site.Name).lnk")
-              $lnk.TargetPath = $braveExe
-              $lnk.Arguments = $site.Url
-              $lnk.Save()
+            $lnk = $WshShell.CreateShortcut("$desktop\$($site.Name).lnk")
+            $lnk.TargetPath = $braveExe
+            $lnk.Arguments = $site.Url
+            $lnk.Save()
           }
-          Write-Host "Website shortcuts created on Public Desktop."
+          Write-Host "Website shortcuts created."
 
       - name: Start Bore & Maintain Connection
         run: |
-          # --- Download & prepare bore ---
           $boreDir = "$env:TEMP\bore"
           $boreZip = "$env:TEMP\bore.zip"
           $boreUrl = "https://github.com/ekzhang/bore/releases/download/v0.5.0/bore-v0.5.0-x86_64-pc-windows-msvc.zip"
-          
+
           Invoke-WebRequest -Uri $boreUrl -OutFile $boreZip -UseBasicParsing
           Expand-Archive $boreZip -DestinationPath $boreDir -Force
           Remove-Item $boreZip -Force
           $boreExe = "$boreDir\bore.exe"
-          
-          # --- Helper: wait for bore address ---
+
           function Get-BoreAddress($logFile, $timeoutSec = 90) {
-              $start = Get-Date
-              while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds($timeoutSec)) {
-                  if (Test-Path $logFile) {
-                      $m = (Get-Content $logFile -Tail 20) | Select-String 'listening at (bore\.pub:\d+)'
-                      if ($m) { return $m.Matches.Groups[1].Value }
-                  }
-                  Start-Sleep -Seconds 1
+            $start = Get-Date
+            while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds($timeoutSec)) {
+              if (Test-Path $logFile) {
+                $m = (Get-Content $logFile -Tail 20) | Select-String 'listening at (bore\.pub:\d+)'
+                if ($m) { return $m.Matches.Groups[1].Value }
               }
-              return $null
+              Start-Sleep -Seconds 1
+            }
+            return $null
           }
-          
-          # --- Main retry loop with auto-restart ---
+
           $maxRetries = 5
           $delay = 10
-          
-          for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-              Write-Host "`n=== Bore attempt $attempt/$maxRetries ==="
-              $logFile = "$env:TEMP\bore_$attempt.log"
-              
-              $proc = Start-Process -FilePath $boreExe -ArgumentList "local 3389 --to bore.pub" `
-                  -NoNewWindow -RedirectStandardOutput $logFile -PassThru
-              
-              $address = Get-BoreAddress -logFile $logFile -timeoutSec 90
-              
-              if ($address) {
-                  Write-Host "`n=== RDP ACCESS ==="
-                  Write-Host "Address: $address"
-                  Write-Host "Username: RDP"
-                  Write-Host "==================`n"
-                  $delay = 10  # reset backoff
-                  
-                  # Watchdog: keep bore alive, restart if it crashes
-                  while ($true) {
-                      Start-Sleep -Seconds 30
-                      if ($proc.HasExited) {
-                          Write-Host "Bore exited (code $($proc.ExitCode)). Restarting..."
-                          break
-                      }
-                      Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active"
-                  }
-              } else {
-                  Write-Warning "Failed to get address (attempt $attempt)"
-                  if ($proc -and !$proc.HasExited) { $proc.Kill() }
-                  Write-Host "Retrying in ${delay}s..."
-                  Start-Sleep -Seconds $delay
-                  $delay = [Math]::Min($delay * 2, 120)  # exponential backoff
-              }
-          }
-          
-          Write-Error "All $maxRetries attempts failed."
 
-      # 9. Auto-Restart Workflow
-      - name: 🔄 Auto-Restart Server
+          for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+            Write-Host ""
+            Write-Host "=== Bore attempt $attempt / $maxRetries ==="
+            $logFile = "$env:TEMP\bore_$attempt.log"
+
+            $proc = Start-Process -FilePath $boreExe `
+              -ArgumentList "local 3389 --to bore.pub" `
+              -NoNewWindow -RedirectStandardOutput $logFile -PassThru
+
+            $address = Get-BoreAddress -logFile $logFile -timeoutSec 90
+
+            if ($address) {
+              Write-Host ""
+              Write-Host "============================================"
+              Write-Host "  RDP ADDRESS : $address"
+              Write-Host "  USERNAME    : RDP"
+              Write-Host "  PASSWORD    : (your secret PASS)"
+              Write-Host "============================================"
+              Write-Host ""
+              $delay = 10
+
+              while ($true) {
+                Start-Sleep -Seconds 30
+                if ($proc.HasExited) {
+                  Write-Host "Bore exited (code $($proc.ExitCode)). Restarting..."
+                  break
+                }
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active — bore.pub address: $address"
+              }
+            } else {
+              Write-Warning "Could not get bore address (attempt $attempt)."
+              if ($proc -and !$proc.HasExited) { $proc.Kill() }
+              Write-Host "Retrying in ${delay}s..."
+              Start-Sleep -Seconds $delay
+              $delay = [Math]::Min($delay * 2, 120)
+            }
+          }
+
+          Write-Error "All $maxRetries bore attempts failed."
+
+      - name: Auto-Restart Workflow
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next workflow run to restart the server..."
+          Write-Host "Restarting workflow..."
           gh workflow run main.yml --ref ${{ github.ref_name }}
