@@ -1,4 +1,4 @@
-name: RDP (Zrok Stable + Apps + Discord + OBS + Captura)
+name: RDP (Zrok Stable - Fast Boot)
 
 on:
   workflow_dispatch:
@@ -50,159 +50,42 @@ jobs:
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           echo "RDP_CREDS=User: RDP | Password: (Hidden)" >> $env:GITHUB_ENV
 
-      - name: Optimize System
+      - name: Optimize System (Fast)
         run: |
           # High Performance power plan
           powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
           
-          # Disable Windows Automatic Updates
+          # Disable Windows Automatic Updates (prevents background lag)
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoUpdate" -Value 1 -Type DWord -Force
           
-          # Remove bloatware (preinstalled UWP apps)
-          $bloat = @(
-            '*xbox*', '*bing*', '*skype*', '*officehub*', '*zune*', '*candycrush*',
-            '*solitaire*', '*spotify*', '*netflix*', '*disney*', '*tiktok*',
-            '*facebook*', '*instagram*', '*twitter*', '*pinterest*', '*minecraft*'
-          )
-          Get-AppxPackage -AllUsers | Where-Object { 
-            $name = $_.Name 
-            [bool]($bloat | Where-Object { $name -like $_ }) 
-          } | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
-          Write-Host "System optimization complete."
-
-      - name: Install Apps
-        run: |
-          Write-Host "Installing Apps..."
-          
-          # Install audio driver for screen recording
-          choco install vb-cable -y --no-progress --ignore-checksums --ignore-package-exit-codes
-          
-          # Bulk install (Choco handles locking internally — faster than sequential)
-          choco install googlechrome brave discord obs-studio ffmpeg captura vlc `
-            -y --no-progress --ignore-checksums --ignore-package-exit-codes
-            
-          # --- Fix Brave to Public ---
-          $BraveAdmin = "C:\Users\runneradmin\AppData\Local\BraveSoftware"
-          if (Test-Path $BraveAdmin) {
-            Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
-          }
-          
-          # --- Fix Discord to Public ---
-          $DiscordAdmin = "C:\Users\runneradmin\AppData\Local\Discord"
-          if (Test-Path $DiscordAdmin) {
-            Copy-Item -Path $DiscordAdmin -Destination "C:\" -Recurse -Force
-          }
-          
-          # --- Fix Captura ---
-          $CapLoc1 = "C:\Users\runneradmin\AppData\Local\Captura"
-          $CapLoc2 = "C:\ProgramData\chocolatey\lib\captura\tools"
-          if (Test-Path $CapLoc1) {
-            Copy-Item -Path $CapLoc1 -Destination "C:\" -Recurse -Force
-            Rename-Item -Path "C:\Captura" -NewName "Captura_App" -ErrorAction SilentlyContinue
-            Rename-Item -Path "C:\Captura_App" -NewName "Captura"
-          } elseif (Test-Path $CapLoc2) {
-            Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
-          }
-          
-          # --- Desktop Shortcuts ---
-          $WshShell = New-Object -comObject WScript.Shell
-          $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
-          $BraveLnk.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
-          $BraveLnk.Save()
-          
-          $DiscordExe = Get-ChildItem -Path "C:\Discord" -Recurse -Filter "Discord.exe" | Select-Object -First 1
-          if ($DiscordExe) {
-            $DiscordLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Discord.lnk")
-            $DiscordLnk.TargetPath = $DiscordExe.FullName
-            $DiscordLnk.Save()
-          }
-          
-          $OBSLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\OBS Studio.lnk")
-          $OBSLnk.TargetPath = "C:\Program Files\obs-studio\bin\64bit\obs64.exe"
-          $OBSLnk.WorkingDirectory = "C:\Program Files\obs-studio\bin\64bit"
-          $OBSLnk.Save()
-          
-          $CapturaLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Captura.lnk")
-          $CapturaLnk.TargetPath = "C:\Captura\Captura.exe"
-          $CapturaLnk.WorkingDirectory = "C:\Captura"
-          $CapturaLnk.Save()
-          
-          # --- Pre-made OBS Profile (720p, 30fps, ready to use) ---
-          $OBSProfDir = "$env:APPDATA\obs-studio\basic\profiles\RDP_Optimized"
-          New-Item -ItemType Directory -Path $OBSProfDir -Force | Out-Null
-          @"
-          [General]
-          Name=RDP_Optimized
-          [Video]
-          BaseCX=1280
-          BaseCY=720
-          OutputCX=1280
-          OutputCY=720
-          FPSType=Common
-          FPSCommon=30
-          ScaleType=bicubic
-          [Output]
-          Mode=Simple
-          RecType=Standard
-          RecFmt=mp4
-          RecEncoder=amd
-          RecQuality=Small
-          RecRB=2500
-          AudioBitrate=128
-          [AdvOut]
-          RecTrack1=1
-          RecTrack2=2
-          "@ | Set-Content -Path "$OBSProfDir\basic.ini" -Encoding ASCII
-          
-          Write-Host "Installs, Shortcuts & OBS Profile Complete."
-
-      - name: Create Website Shortcuts
-        run: |
-          $braveExe = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
-          $desktop = "C:\Users\Public\Desktop"
-          
-          $sites = @(
-            @{Name="Cinevo"; Url="https://cinevo.site"},
-            @{Name="StreamEx"; Url="https://streamex.sh"},
-            @{Name="Mappl TV"; Url="https://mappl.tv/"},
-            @{Name="7Reels"; Url="https://7reels.cc/"},
-            @{Name="SkyFlixer"; Url="https://skyflixer.fun/"},
-            @{Name="1Flex"; Url="https://1flex.org"},
-            @{Name="RedFlix"; Url="https://redflix.co/"},
-            @{Name="Cinezo"; Url="https://cinezo.net/"},
-            @{Name="Discord"; Url="https://discord.com/app"}
-          )
-          
-          $WshShell = New-Object -comObject WScript.Shell
-          foreach ($site in $sites) {
-            $lnk = $WshShell.CreateShortcut("$desktop\$($site.Name).lnk")
-            $lnk.TargetPath = $braveExe
-            $lnk.Arguments = $site.Url
-            $lnk.Save()
-          }
-          Write-Host "Website shortcuts created on Public Desktop."
+          Write-Host "Core system optimization complete."
 
       - name: Start Zrok & Maintain Connection
         env:
           ZROK_TOKEN: ${{ secrets.ZROK_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if (-not $env:ZROK_TOKEN) {
             Write-Error "Secret 'ZROK_TOKEN' is missing. Add it in Repository Settings."
             exit 1
           }
 
-          # --- Download & prepare zrok ---
+          # --- Download & prepare zrok using authenticated CLI to avoid rate limits ---
           $zrokDir = "$env:TEMP\zrok"
-          $zrokZip = "$env:TEMP\zrok.zip"
+          New-Item -ItemType Directory -Force -Path $zrokDir | Out-Null
           
-          # Fetch latest Windows release dynamically
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openziti/zrok/releases/latest"
-          $asset = $release.assets | Where-Object { $_.name -match "windows_amd64.zip" }
+          Write-Host "Fetching latest zrok release..."
+          gh release download --repo openziti/zrok --pattern "*windows_amd64.zip" --dir $zrokDir
           
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zrokZip -UseBasicParsing
-          Expand-Archive $zrokZip -DestinationPath $zrokDir -Force
-          Remove-Item $zrokZip -Force
+          $zrokZip = Get-ChildItem -Path $zrokDir -Filter "*windows_amd64.zip" | Select-Object -First 1
+          if (-not $zrokZip) {
+            Write-Error "Failed to download zrok zip file."
+            exit 1
+          }
+          
+          Expand-Archive $zrokZip.FullName -DestinationPath $zrokDir -Force
+          Remove-Item $zrokZip.FullName -Force
           $zrokExe = "$zrokDir\zrok.exe"
 
           # --- Enable zrok ---
