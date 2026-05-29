@@ -1,4 +1,4 @@
-Name: RDP (Zrok Stable + Apps + Discord + OBS + Captura)
+name: RDP (Zrok Stable + Apps + Discord + OBS + Captura)
 
 on:
   workflow_dispatch:
