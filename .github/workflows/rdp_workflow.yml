@@ -193,26 +193,8 @@ jobs:
           # OBS Profile (720p 30fps ready to use)
           $OBSProfDir = "C:\Users\RDP\AppData\Roaming\obs-studio\basic\profiles\RDP_Optimized"
           New-Item -ItemType Directory -Path $OBSProfDir -Force | Out-Null
-          @"
-[General]
-Name=RDP_Optimized
-[Video]
-BaseCX=1280
-BaseCY=720
-OutputCX=1280
-OutputCY=720
-FPSType=Common
-FPSCommon=30
-ScaleType=bicubic
-[Output]
-Mode=Simple
-RecType=Standard
-RecFmt=mp4
-RecEncoder=amd
-RecQuality=Small
-RecRB=2500
-AudioBitrate=128
-"@ | Set-Content -Path "$OBSProfDir\basic.ini" -Encoding ASCII
+          $obsIni = "[General]`nName=RDP_Optimized`n[Video]`nBaseCX=1280`nBaseCY=720`nOutputCX=1280`nOutputCY=720`nFPSType=Common`nFPSCommon=30`nScaleType=bicubic`n[Output]`nMode=Simple`nRecType=Standard`nRecFmt=mp4`nRecEncoder=amd`nRecQuality=Small`nRecRB=2500`nAudioBitrate=128"
+          $obsIni | Set-Content -Path "$OBSProfDir\basic.ini" -Encoding ASCII
 
           Write-Host "All desktop shortcuts created."
 
