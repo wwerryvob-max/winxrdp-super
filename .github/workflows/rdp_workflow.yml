@@ -90,10 +90,16 @@ jobs:
           if ($zrokArchive.Name.EndsWith(".zip")) {
             Expand-Archive $zrokArchive.FullName -DestinationPath $zrokDir -Force
           } else {
-            tar -xf $zrokArchive.FullName -C $zrokDir
+            tar -xzf $zrokArchive.FullName -C $zrokDir
           }
           
-          $zrokExe = "$zrokDir\zrok.exe"
+          # Dynamically locate the executable inside the extracted folders
+          $zrokExe = (Get-ChildItem -Path $zrokDir -Filter "zrok.exe" -Recurse | Select-Object -First 1).FullName
+          
+          if (-not $zrokExe) {
+            Write-Error "Failed to find zrok.exe after extraction."
+            exit 1
+          }
 
           # --- Enable zrok ---
           & $zrokExe enable $env:ZROK_TOKEN
