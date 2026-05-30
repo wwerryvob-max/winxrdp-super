@@ -137,14 +137,16 @@ jobs:
             exit 1
           }
 
-          # --- Helper: wait for zrok public TCP address in log ---
-          function Get-ZrokAddress($logFile, $timeoutSec = 90) {
+          # --- Helper: wait for zrok public TCP address in both log files ---
+          # PowerShell's Start-Process requires SEPARATE files for stdout and stderr.
+          # We read both files to find the TCP address zrok prints to either stream.
+          function Get-ZrokAddress($stdoutLog, $stderrLog, $timeoutSec = 90) {
             $start = Get-Date
             while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds($timeoutSec)) {
-              if (Test-Path $logFile) {
-                $m = (Get-Content $logFile -Tail 30) | Select-String 'tcp://([a-zA-Z0-9\.\-_]+:\d+)'
-                if ($m) {
-                  return $m.Matches.Groups[1].Value.Trim()
+              foreach ($lf in @($stdoutLog, $stderrLog)) {
+                if (Test-Path $lf) {
+                  $m = (Get-Content $lf -Tail 30) | Select-String 'tcp://([a-zA-Z0-9\.\-_]+:\d+)'
+                  if ($m) { return $m.Matches.Groups[1].Value.Trim() }
                 }
               }
               Start-Sleep -Seconds 2
@@ -158,13 +160,19 @@ jobs:
 
           for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
             Write-Host "`n=== Zrok attempt $attempt/$maxRetries ==="
-            $logFile = "$env:TEMP\zrok_$attempt.log"
+
+            # Use SEPARATE files for stdout and stderr — same file causes an error
+            $stdoutLog = "$env:TEMP\zrok_stdout_$attempt.log"
+            $stderrLog = "$env:TEMP\zrok_stderr_$attempt.log"
 
             $proc = Start-Process -FilePath $zrokExe `
               -ArgumentList "share public localhost:3389 --backend-mode tcp" `
-              -NoNewWindow -RedirectStandardOutput $logFile -RedirectStandardError $logFile -PassThru
+              -NoNewWindow `
+              -RedirectStandardOutput $stdoutLog `
+              -RedirectStandardError  $stderrLog `
+              -PassThru
 
-            $address = Get-ZrokAddress -logFile $logFile -timeoutSec 90
+            $address = Get-ZrokAddress -stdoutLog $stdoutLog -stderrLog $stderrLog -timeoutSec 90
 
             if ($address) {
               Write-Host "`n=========================================="
@@ -188,11 +196,13 @@ jobs:
             } else {
               Write-Warning "Failed to get public address on attempt $attempt."
               if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-              # Print last 20 lines of log for debugging
-              if (Test-Path $logFile) {
-                Write-Host "--- Last zrok log lines ---"
-                Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host $_ }
-                Write-Host "---------------------------"
+              # Dump both log files for debugging
+              foreach ($lf in @($stdoutLog, $stderrLog)) {
+                if (Test-Path $lf) {
+                  Write-Host "--- $lf (last 20 lines) ---"
+                  Get-Content $lf -Tail 20 | ForEach-Object { Write-Host $_ }
+                  Write-Host "---------------------------"
+                }
               }
               Write-Host "Retrying in ${delay}s..."
               Start-Sleep -Seconds $delay
