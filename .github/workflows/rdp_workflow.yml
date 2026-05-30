@@ -17,21 +17,21 @@ jobs:
           Start-Service -Name Audiosrv
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
-          
+
           # Enable clipboard sharing
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableClip" -Value 0 -Force
-          
+
           # Enable Remote Desktop (disable NLA for log-based interaction)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          
+
           # Enable auto-reconnect on disconnect
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableAutoReconnect" -Value 1 -Force
-          
+
           # Firewall
           netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-          
+
           # Auto-restart RDP service if it crashes
           sc failure TermService reset=86400 actions=restart/5000/restart/10000/restart/30000
           Restart-Service -Name TermService -Force
@@ -54,127 +54,168 @@ jobs:
         run: |
           # High Performance power plan
           powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-          
+
           # Disable Windows Automatic Updates (prevents background lag)
           New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoUpdate" -Value 1 -Type DWord -Force
-          
+
           Write-Host "Core system optimization complete."
 
       - name: Start Zrok & Maintain Connection
         env:
           ZROK_TOKEN: ${{ secrets.ZROK_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           if (-not $env:ZROK_TOKEN) {
             Write-Error "Secret 'ZROK_TOKEN' is missing. Add it in Repository Settings."
             exit 1
           }
 
-          # --- Download & prepare zrok using authenticated CLI ---
+          # ---------------------------------------------------------------
+          # FIX EXPLANATION:
+          # 1. zrok v2 (released March 2026) renamed the binary to zrok2.exe.
+          #    The GitHub API /releases/latest now returns v2, which has NO
+          #    zrok.exe inside — only zrok2.exe. So we MUST pin to the latest
+          #    v1 release (v1.1.11) by fetching the tag from the API directly.
+          # 2. zrok Windows releases are ONLY .tar.gz — never .zip.
+          #    The old pattern "*windows_amd64.zip" matched nothing, causing
+          #    a silent download failure before extraction even started.
+          # ---------------------------------------------------------------
+
           $zrokDir = "$env:TEMP\zrok"
           New-Item -ItemType Directory -Force -Path $zrokDir | Out-Null
-          
-          Write-Host "Fetching latest zrok release..."
-          
-          # OpenZiti occasionally packages as .tar.gz instead of .zip. This targets both.
-          gh release download --repo openziti/zrok --pattern "*windows_amd64.zip" --pattern "*windows_amd64.tar.gz" --dir $zrokDir
-          
-          $zrokArchive = Get-ChildItem -Path $zrokDir -Filter "*windows_amd64*" | Select-Object -First 1
-          if (-not $zrokArchive) {
-            Write-Error "Failed to download zrok zip/tar file."
-            exit 1
-          }
-          
-          # Extract dynamically based on format
-          if ($zrokArchive.Name.EndsWith(".zip")) {
-            Expand-Archive $zrokArchive.FullName -DestinationPath $zrokDir -Force
-          } else {
-            tar -xzf $zrokArchive.FullName -C $zrokDir
-          }
-          
-          # Dynamically locate the executable inside the extracted folders
-          $zrokExe = (Get-ChildItem -Path $zrokDir -Filter "zrok.exe" -Recurse | Select-Object -First 1).FullName
-          
-          if (-not $zrokExe) {
-            Write-Error "Failed to find zrok.exe after extraction."
+
+          # Step 1: Find the latest v1.x.x tag via GitHub API (avoid v2)
+          Write-Host "Fetching latest zrok v1 release tag..."
+          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/openziti/zrok/releases" -Headers @{ "User-Agent" = "gh-actions" }
+          $v1Release = $releases | Where-Object { $_.tag_name -match '^v1\.' -and -not $_.prerelease } | Select-Object -First 1
+
+          if (-not $v1Release) {
+            Write-Error "Could not find a zrok v1 release from GitHub API."
             exit 1
           }
 
-          # --- Enable zrok ---
+          $zrokVersion = $v1Release.tag_name          # e.g. "v1.1.11"
+          $versionNum  = $zrokVersion.TrimStart('v')  # e.g. "1.1.11"
+          Write-Host "Using zrok version: $zrokVersion"
+
+          # Step 2: Build the direct download URL for the Windows amd64 tar.gz
+          # Filename format: zrok_1.1.11_windows_amd64.tar.gz
+          $fileName   = "zrok_${versionNum}_windows_amd64.tar.gz"
+          $downloadUrl = "https://github.com/openziti/zrok/releases/download/${zrokVersion}/${fileName}"
+          $archivePath = Join-Path $zrokDir $fileName
+
+          Write-Host "Downloading: $downloadUrl"
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
+          if (-not (Test-Path $archivePath)) {
+            Write-Error "Download failed — archive not found at: $archivePath"
+            exit 1
+          }
+          Write-Host "Download complete: $archivePath ($(([System.IO.FileInfo]$archivePath).Length) bytes)"
+
+          # Step 3: Extract the tar.gz using built-in tar (available on Windows 10+/Server 2019+)
+          $extractDir = Join-Path $zrokDir "extracted"
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Write-Host "Extracting archive..."
+          tar -xzf $archivePath -C $extractDir
+
+          # Step 4: Find zrok.exe (v1 still uses zrok.exe, not zrok2.exe)
+          Write-Host "Searching for zrok.exe..."
+          Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host "  Found: $($_.FullName)" }
+          $zrokExe = (Get-ChildItem -Path $extractDir -Filter "zrok.exe" -Recurse | Select-Object -First 1).FullName
+
+          if (-not $zrokExe) {
+            Write-Error "zrok.exe not found after extraction. Archive contents listed above."
+            exit 1
+          }
+          Write-Host "Located zrok.exe at: $zrokExe"
+
+          # Step 5: Enable zrok environment with your token
+          Write-Host "Enabling zrok environment..."
           & $zrokExe enable $env:ZROK_TOKEN
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to enable zrok. Check your ZROK_TOKEN."
+            Write-Error "Failed to enable zrok. Check your ZROK_TOKEN secret."
             exit 1
           }
 
-          # --- Helper: wait for zrok public address ---
+          # --- Helper: wait for zrok public TCP address in log ---
           function Get-ZrokAddress($logFile, $timeoutSec = 90) {
             $start = Get-Date
             while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds($timeoutSec)) {
               if (Test-Path $logFile) {
-                # Look for the public tcp/udp endpoint in the logs
-                $m = (Get-Content $logFile -Tail 20) | Select-String 'tcp://([a-zA-Z0-9\.\-_]+:\d+)'
+                $m = (Get-Content $logFile -Tail 30) | Select-String 'tcp://([a-zA-Z0-9\.\-_]+:\d+)'
                 if ($m) {
                   return $m.Matches.Groups[1].Value.Trim()
                 }
               }
-              Start-Sleep -Seconds 1
+              Start-Sleep -Seconds 2
             }
             return $null
           }
 
-          # --- Main retry loop with auto-restart ---
+          # --- Main retry loop with watchdog ---
           $maxRetries = 5
           $delay = 10
-          
+
           for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
             Write-Host "`n=== Zrok attempt $attempt/$maxRetries ==="
             $logFile = "$env:TEMP\zrok_$attempt.log"
-            
-            # Use 'share public' with tcp backend mode so mobile devices can access it directly
-            $proc = Start-Process -FilePath $zrokExe -ArgumentList "share public localhost:3389 --backend-mode tcp" `
+
+            $proc = Start-Process -FilePath $zrokExe `
+              -ArgumentList "share public localhost:3389 --backend-mode tcp" `
               -NoNewWindow -RedirectStandardOutput $logFile -RedirectStandardError $logFile -PassThru
-              
+
             $address = Get-ZrokAddress -logFile $logFile -timeoutSec 90
-            
+
             if ($address) {
-              Write-Host "`n=== RDP ACCESS ==="
-              Write-Host "Address for Mobile App: $address"
-              Write-Host "Username: RDP"
-              Write-Host "Password: (Hidden)"
-              Write-Host "==================`n"
-              
-              $delay = 10 # reset backoff
-              
-              # Watchdog: keep zrok alive, restart if it crashes
+              Write-Host "`n=========================================="
+              Write-Host "  RDP ACCESS READY"
+              Write-Host "  Address : $address"
+              Write-Host "  Username: RDP"
+              Write-Host "  Password: (from your PASS secret)"
+              Write-Host "==========================================`n"
+
+              $delay = 10
+
+              # Watchdog: keep alive, restart zrok if it crashes
               while ($true) {
                 Start-Sleep -Seconds 30
                 if ($proc.HasExited) {
-                  Write-Host "Zrok exited (code $($proc.ExitCode)). Restarting..."
+                  Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Zrok process exited (code $($proc.ExitCode)). Restarting..."
                   break
                 }
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP Active via Zrok Public TCP"
+                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP active via Zrok TCP — $address"
               }
             } else {
-              Write-Warning "Failed to get public address (attempt $attempt)"
-              if ($proc -and !$proc.HasExited) {
-                $proc.Kill()
+              Write-Warning "Failed to get public address on attempt $attempt."
+              if ($proc -and -not $proc.HasExited) { $proc.Kill() }
+              # Print last 20 lines of log for debugging
+              if (Test-Path $logFile) {
+                Write-Host "--- Last zrok log lines ---"
+                Get-Content $logFile -Tail 20 | ForEach-Object { Write-Host $_ }
+                Write-Host "---------------------------"
               }
               Write-Host "Retrying in ${delay}s..."
               Start-Sleep -Seconds $delay
-              $delay = [Math]::Min($delay * 2, 120) # exponential backoff
+              $delay = [Math]::Min($delay * 2, 120)
             }
           }
-          
-          Write-Error "All $maxRetries attempts failed."
 
-      # 9. Auto-Restart Workflow
+          Write-Error "All $maxRetries zrok attempts failed. See logs above."
+
+      # Auto-Restart Workflow
+      # IMPORTANT: This requires a Personal Access Token with 'repo' + 'workflow' scopes.
+      # Create one at: GitHub → Settings → Developer Settings → Personal Access Tokens
+      # Then add it as a repository secret named MY_PAT.
+      # The default GITHUB_TOKEN cannot trigger workflow dispatches (HTTP 403).
       - name: 🔄 Auto-Restart Server
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
-          echo "Triggering next workflow run to restart the server..."
-          # Adding --repo bypasses the need for a .git checkout folder
+          if (-not $env:GH_TOKEN) {
+            Write-Warning "Secret 'MY_PAT' is missing — auto-restart skipped."
+            Write-Warning "Create a PAT with 'repo' + 'workflow' scopes and add it as MY_PAT."
+            exit 0
+          }
+          Write-Host "Triggering next workflow run..."
           gh workflow run "${{ github.workflow }}" --repo ${{ github.repository }} --ref ${{ github.ref_name }}
