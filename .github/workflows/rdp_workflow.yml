@@ -34,7 +34,7 @@ jobs:
           echo "Applying Firefox Sandbox Fix..."
           sudo sed -i 's/^Exec=firefox-esr.*/Exec=firefox-esr --no-sandbox --disable-seccomp/' /usr/share/applications/firefox-esr.desktop
 
-      - name: Create RDP User & Patch XRDP Startup
+      - name: Create RDP User & Apply Claude's Fix
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
@@ -48,21 +48,31 @@ jobs:
           echo "RDP:$MY_SECRET_PASS" | sudo chpasswd
           sudo usermod -aG sudo RDP
           
-          echo "Patching the global XRDP script..."
-          # Tell the global script to launch startxfce4
-          sudo sed -i.bak '/fi/a #xrdp multiple users fix \n startxfce4 \n' /etc/xrdp/startwm.sh
+          echo "Applying Claude's XRDP/D-Bus Fix..."
+          # Recreate the global startup script exactly as Claude specified
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"
+          #!/bin/sh
+          if [ -r /etc/default/locale ]; then
+            . /etc/default/locale
+            export LANG LANGUAGE
+          fi
           
-          # Comment out the default Ubuntu session execution at the bottom of the script
-          sudo sed -i 's/^test -x \/etc\/X11\/Xsession/#test -x \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
-          sudo sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#exec \/bin\/sh \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
+          unset DBUS_SESSION_BUS_ADDRESS
+          unset XDG_RUNTIME_DIR
           
-          echo "Creating local user configuration..."
-          echo "startxfce4" | sudo tee /home/RDP/.Xclients
-          sudo chown RDP:RDP /home/RDP/.Xclients
-          sudo chmod +x /home/RDP/.Xclients
+          test -x /etc/X11/Xsession && exec /etc/X11/Xsession
+          exec /bin/sh /etc/X11/Xsession
+          EOF'
           
-          echo "Restarting XRDP service..."
-          sudo systemctl restart xrdp
+          sudo chmod +x /etc/xrdp/startwm.sh
+          
+          # Tell the session manager to use XFCE4
+          echo "xfce4-session" | sudo tee /home/RDP/.xsession
+          sudo chown RDP:RDP /home/RDP/.xsession
+          
+          echo "Restarting DBus and XRDP services..."
+          sudo systemctl restart dbus
+          sudo systemctl restart xrdp xrdp-sesman
 
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
@@ -80,8 +90,10 @@ jobs:
           echo "Installing and Starting Cloudflare Tunnel as a service..."
           sudo cloudflared service install $CF_TOKEN
           
+          # --- SECURITY SCRUB START ---
           export CF_TOKEN=""
           history -c
+          # --- SECURITY SCRUB END ---
           
           echo -e "\n=== RDP ACCESS ==="
           echo "Username: RDP"
@@ -89,8 +101,9 @@ jobs:
           echo "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
           echo -e "==================\n"
           
-          # Timer setup: Run for exactly 345 minutes
+          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
           END_TIME=$(($(date +%s) + 20700)) 
+          echo "Runner will stay active until the 5 hour 45 min mark."
           
           while [ $(date +%s) -lt $END_TIME ]; do
               echo "[$(date)] Linux RDP Active via Cloudflare - Cancel workflow to terminate early"
