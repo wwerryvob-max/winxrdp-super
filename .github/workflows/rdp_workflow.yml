@@ -206,6 +206,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path "C:\Users\Public\Desktop\SavedFiles" | Out-Null
           Write-Host "SavedFiles folder created on Desktop."
 
+          # Fix permissions so the RDP user has full write access to all restored files.
+          # Without this, files created by runneradmin (rclone) are read-only for the RDP user.
+          Write-Host "Granting RDP user full control over SavedFiles..."
+          icacls "C:\Users\Public\Desktop\SavedFiles" /grant "RDP:(OI)(CI)(F)" /T /C | Out-Null
+          Write-Host "Permissions fixed - RDP user can now read and write all files."
+
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
           CF_TOKEN: ${{ secrets.CF_TOKEN }}
