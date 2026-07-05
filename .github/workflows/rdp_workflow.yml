@@ -1,4 +1,4 @@
-name: RDP (Zrok Stable - Fast Boot)
+name: RDP (Cloudflare + Captura + Apps)
 
 on:
   workflow_dispatch:
@@ -6,34 +6,32 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360
+    timeout-minutes: 3600
 
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # --- AUDIO & SESSION FIXES ---
+          # --- AUDIO & SESSION FIXES START HERE ---
           Set-Service -Name Audiosrv -StartupType Automatic
-          sc failure Audiosrv reset=86400 actions=restart/5000/restart/10000/restart/30000
           Start-Service -Name Audiosrv
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
+          # --- FIXES END HERE ---
 
-          # Enable clipboard sharing
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableClip" -Value 0 -Force
+          # Enable Remote Desktop and disable Network Level Authentication
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
 
-          # Enable Remote Desktop (disable NLA for log-based interaction)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          # Remove existing rule, then allow incoming RDP connections
+          netsh advfirewall firewall delete rule name="RDP-Tunnel"
+          netsh advfirewall firewall add rule name="RDP-Tunnel" `
+            dir=in action=allow protocol=TCP localport=3389
 
-          # Enable auto-reconnect on disconnect
-          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableAutoReconnect" -Value 1 -Force
-
-          # Firewall
-          netsh advfirewall firewall delete rule name="RDP-Tailscale" 2>$null
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
-          # Auto-restart RDP service if it crashes
-          sc failure TermService reset=86400 actions=restart/5000/restart/10000/restart/30000
+          # Restart Remote Desktop service
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User with Secure Password
@@ -41,191 +39,97 @@ jobs:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
           if (-not $env:MY_SECRET_PASS) {
-            Write-Error "Secret 'PASS' is missing. Add it in Repository Settings."
-            exit 1
+              Write-Error "Error: Secret 'PASS' is empty or missing. Please add it in Repository Settings."
+              exit 1
           }
-          $securePass = ConvertTo-SecureString $env:MY_SECRET_PASS -AsPlainText -Force
+
+          $password = $env:MY_SECRET_PASS
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          echo "RDP_CREDS=User: RDP | Password: (Hidden)" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
 
-      - name: Optimize System (Fast)
+      - name: Install Apps & Fix Shortcuts
         run: |
-          # High Performance power plan
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          Write-Host "Installing Apps..."
+          
+          # 1. Install via Chocolatey
+          choco install vb-cable -y --no-progress --ignore-checksums
+          choco install winrar -y --no-progress
+          choco install googlechrome -y --no-progress --ignore-checksums
+          choco install brave -y --no-progress
+          choco install ffmpeg -y --no-progress
+          choco install captura -y --no-progress
+          
+          # 2. FIX BRAVE: Move to Public Folder
+          $BraveAdmin = "C:\Users\runneradmin\AppData\Local\BraveSoftware"
+          if (Test-Path $BraveAdmin) {
+              Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
+          }
+          
+          # 3. FIX CAPTURA: Find and Move to Public Folder
+          $CapLoc1 = "C:\Users\runneradmin\AppData\Local\Captura"
+          $CapLoc2 = "C:\ProgramData\chocolatey\lib\captura\tools"
+          
+          if (Test-Path $CapLoc1) {
+              Copy-Item -Path $CapLoc1 -Destination "C:\" -Recurse -Force
+              Rename-Item -Path "C:\Captura" -NewName "Captura_App" -ErrorAction SilentlyContinue
+              Rename-Item -Path "C:\Captura_App" -NewName "Captura"
+          }
+          elseif (Test-Path $CapLoc2) {
+              Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
+          }
+          
+          # 4. Create Desktop Shortcuts
+          $WshShell = New-Object -comObject WScript.Shell
+          
+          # Brave
+          $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
+          $BraveLnk.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
+          $BraveLnk.Save()
+          
+          # Captura
+          $CapturaLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Captura.lnk")
+          $CapturaLnk.TargetPath = "C:\Captura\Captura.exe"
+          $CapturaLnk.WorkingDirectory = "C:\Captura"
+          $CapturaLnk.Save()
 
-          # Disable Windows Automatic Updates (prevents background lag)
-          New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Force | Out-Null
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoUpdate" -Value 1 -Type DWord -Force
+          # WinRAR
+          $RarLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\WinRAR.lnk")
+          $RarLnk.TargetPath = "C:\Program Files\WinRAR\WinRAR.exe"
+          $RarLnk.Save()
+          
+          Write-Host "Installation and Shortcuts Complete."
 
-          Write-Host "Core system optimization complete."
-
-      - name: Start Zrok & Maintain Connection
+      - name: Start Cloudflare Tunnel & Maintain Connection
         env:
-          ZROK_TOKEN: ${{ secrets.ZROK_TOKEN }}
+          CF_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
-          if (-not $env:ZROK_TOKEN) {
-            Write-Error "Secret 'ZROK_TOKEN' is missing. Add it in Repository Settings."
-            exit 1
+          if (-not $env:CF_TOKEN) {
+              Write-Error "Error: Secret 'CF_TOKEN' is missing. Add your Cloudflare token to Secrets."
+              exit 1
           }
 
-          # ---------------------------------------------------------------
-          # FIX EXPLANATION:
-          # 1. zrok v2 (released March 2026) renamed the binary to zrok2.exe.
-          #    The GitHub API /releases/latest now returns v2, which has NO
-          #    zrok.exe inside — only zrok2.exe. So we MUST pin to the latest
-          #    v1 release (v1.1.11) by fetching the tag from the API directly.
-          # 2. zrok Windows releases are ONLY .tar.gz — never .zip.
-          #    The old pattern "*windows_amd64.zip" matched nothing, causing
-          #    a silent download failure before extraction even started.
-          # ---------------------------------------------------------------
-
-          $zrokDir = "$env:TEMP\zrok"
-          New-Item -ItemType Directory -Force -Path $zrokDir | Out-Null
-
-          # Step 1: Find the latest v1.x.x tag via GitHub API (avoid v2)
-          Write-Host "Fetching latest zrok v1 release tag..."
-          $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/openziti/zrok/releases" -Headers @{ "User-Agent" = "gh-actions" }
-          $v1Release = $releases | Where-Object { $_.tag_name -match '^v1\.' -and -not $_.prerelease } | Select-Object -First 1
-
-          if (-not $v1Release) {
-            Write-Error "Could not find a zrok v1 release from GitHub API."
-            exit 1
+          Write-Host "Downloading Cloudflared for Windows..."
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          
+          Write-Host "Installing and Starting Cloudflare Tunnel as a service..."
+          .\cloudflared.exe service install $env:CF_TOKEN
+          
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Username: RDP"
+          Write-Host "Password: (Hidden - Check your Secrets)"
+          Write-Host "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
+          Write-Host "==================`n"
+          
+          # Keep runner active indefinitely
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate"
+              Start-Sleep -Seconds 300
           }
-
-          $zrokVersion = $v1Release.tag_name          # e.g. "v1.1.11"
-          $versionNum  = $zrokVersion.TrimStart('v')  # e.g. "1.1.11"
-          Write-Host "Using zrok version: $zrokVersion"
-
-          # Step 2: Build the direct download URL for the Windows amd64 tar.gz
-          # Filename format: zrok_1.1.11_windows_amd64.tar.gz
-          $fileName   = "zrok_${versionNum}_windows_amd64.tar.gz"
-          $downloadUrl = "https://github.com/openziti/zrok/releases/download/${zrokVersion}/${fileName}"
-          $archivePath = Join-Path $zrokDir $fileName
-
-          Write-Host "Downloading: $downloadUrl"
-          Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath -UseBasicParsing
-          if (-not (Test-Path $archivePath)) {
-            Write-Error "Download failed — archive not found at: $archivePath"
-            exit 1
-          }
-          Write-Host "Download complete: $archivePath ($(([System.IO.FileInfo]$archivePath).Length) bytes)"
-
-          # Step 3: Extract the tar.gz using built-in tar (available on Windows 10+/Server 2019+)
-          $extractDir = Join-Path $zrokDir "extracted"
-          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-          Write-Host "Extracting archive..."
-          tar -xzf $archivePath -C $extractDir
-
-          # Step 4: Find zrok.exe (v1 still uses zrok.exe, not zrok2.exe)
-          Write-Host "Searching for zrok.exe..."
-          Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host "  Found: $($_.FullName)" }
-          $zrokExe = (Get-ChildItem -Path $extractDir -Filter "zrok.exe" -Recurse | Select-Object -First 1).FullName
-
-          if (-not $zrokExe) {
-            Write-Error "zrok.exe not found after extraction. Archive contents listed above."
-            exit 1
-          }
-          Write-Host "Located zrok.exe at: $zrokExe"
-
-          # Step 5: Enable zrok environment with your token
-          Write-Host "Enabling zrok environment..."
-          & $zrokExe enable $env:ZROK_TOKEN
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to enable zrok. Check your ZROK_TOKEN secret."
-            exit 1
-          }
-
-          # --- Helper: wait for zrok public TCP address in both log files ---
-          # PowerShell's Start-Process requires SEPARATE files for stdout and stderr.
-          # We read both files to find the TCP address zrok prints to either stream.
-          function Get-ZrokAddress($stdoutLog, $stderrLog, $timeoutSec = 90) {
-            $start = Get-Date
-            while ((Get-Date) - $start -lt [TimeSpan]::FromSeconds($timeoutSec)) {
-              foreach ($lf in @($stdoutLog, $stderrLog)) {
-                if (Test-Path $lf) {
-                  $m = (Get-Content $lf -Tail 30) | Select-String 'tcp://([a-zA-Z0-9\.\-_]+:\d+)'
-                  if ($m) { return $m.Matches.Groups[1].Value.Trim() }
-                }
-              }
-              Start-Sleep -Seconds 2
-            }
-            return $null
-          }
-
-          # --- Main retry loop with watchdog ---
-          $maxRetries = 5
-          $delay = 10
-
-          for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-            Write-Host "`n=== Zrok attempt $attempt/$maxRetries ==="
-
-            # Use SEPARATE files for stdout and stderr — same file causes an error
-            $stdoutLog = "$env:TEMP\zrok_stdout_$attempt.log"
-            $stderrLog = "$env:TEMP\zrok_stderr_$attempt.log"
-
-            $proc = Start-Process -FilePath $zrokExe `
-              -ArgumentList "share public localhost:3389 --backend-mode tcp" `
-              -NoNewWindow `
-              -RedirectStandardOutput $stdoutLog `
-              -RedirectStandardError  $stderrLog `
-              -PassThru
-
-            $address = Get-ZrokAddress -stdoutLog $stdoutLog -stderrLog $stderrLog -timeoutSec 90
-
-            if ($address) {
-              Write-Host "`n=========================================="
-              Write-Host "  RDP ACCESS READY"
-              Write-Host "  Address : $address"
-              Write-Host "  Username: RDP"
-              Write-Host "  Password: (from your PASS secret)"
-              Write-Host "==========================================`n"
-
-              $delay = 10
-
-              # Watchdog: keep alive, restart zrok if it crashes
-              while ($true) {
-                Start-Sleep -Seconds 30
-                if ($proc.HasExited) {
-                  Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Zrok process exited (code $($proc.ExitCode)). Restarting..."
-                  break
-                }
-                Write-Host "[$(Get-Date -Format 'HH:mm:ss')] RDP active via Zrok TCP — $address"
-              }
-            } else {
-              Write-Warning "Failed to get public address on attempt $attempt."
-              if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-              # Dump both log files for debugging
-              foreach ($lf in @($stdoutLog, $stderrLog)) {
-                if (Test-Path $lf) {
-                  Write-Host "--- $lf (last 20 lines) ---"
-                  Get-Content $lf -Tail 20 | ForEach-Object { Write-Host $_ }
-                  Write-Host "---------------------------"
-                }
-              }
-              Write-Host "Retrying in ${delay}s..."
-              Start-Sleep -Seconds $delay
-              $delay = [Math]::Min($delay * 2, 120)
-            }
-          }
-
-          Write-Error "All $maxRetries zrok attempts failed. See logs above."
-
-      # Auto-Restart Workflow
-      # IMPORTANT: This requires a Personal Access Token with 'repo' + 'workflow' scopes.
-      # Create one at: GitHub → Settings → Developer Settings → Personal Access Tokens
-      # Then add it as a repository secret named MY_PAT.
-      # The default GITHUB_TOKEN cannot trigger workflow dispatches (HTTP 403).
-      - name: 🔄 Auto-Restart Server
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.MY_PAT }}
-        run: |
-          if (-not $env:GH_TOKEN) {
-            Write-Warning "Secret 'MY_PAT' is missing — auto-restart skipped."
-            Write-Warning "Create a PAT with 'repo' + 'workflow' scopes and add it as MY_PAT."
-            exit 0
-          }
-          Write-Host "Triggering next workflow run..."
-          gh workflow run "${{ github.workflow }}" --repo ${{ github.repository }} --ref ${{ github.ref_name }}
