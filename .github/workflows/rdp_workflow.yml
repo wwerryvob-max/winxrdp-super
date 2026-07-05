@@ -3,6 +3,11 @@ name: RDP (Cloudflare + Captura + Apps)
 on:
   workflow_dispatch:
 
+# REQUIRED: Grants the GitHub token permission to trigger the next workflow run
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   secure-rdp:
     runs-on: windows-latest
@@ -128,8 +133,22 @@ jobs:
           Write-Host "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
           Write-Host "==================`n"
           
-          # Keep runner active indefinitely
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate"
+          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
+          $endTime = (Get-Date).AddMinutes(345)
+          Write-Host "Runner will stay active until $endTime"
+          
+          while ((Get-Date) -lt $endTime) {
+              Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate early"
               Start-Sleep -Seconds 300
           }
+          
+          Write-Host "Time limit reached (5 hours 45 mins). Proceeding to auto-restart..."
+
+      - name: 🔄 Auto-Restart Server
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Write-Host "Triggering next workflow run to restart the server..."
+          gh workflow run rdp_workflow.yml --ref ${{ github.ref_name }}
+          Write-Host "✅ Restart triggered successfully!"
