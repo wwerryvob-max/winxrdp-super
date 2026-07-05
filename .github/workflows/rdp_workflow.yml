@@ -24,21 +24,18 @@ jobs:
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
           
-          # Now we can safely install the native firefox-esr alongside the desktop
+          # Install the desktop environment and native Firefox ESR
           echo "Installing XFCE and native Firefox ESR..."
           sudo DEBIAN_FRONTEND=noninteractive apt install xfce4 xfce4-goodies xrdp dbus-x11 firefox-esr -y
           
-          echo "Configuring XRDP Session..."
-          echo "export \$(dbus-launch)" > ~/.xsession
-          echo "xfce4-session" >> ~/.xsession
-          sudo chown $(whoami):$(whoami) ~/.xsession
+          # Enable XRDP service
           sudo adduser xrdp ssl-cert
           sudo systemctl enable --now xrdp
           
           echo "Applying Firefox Sandbox Fix..."
           sudo sed -i 's/^Exec=firefox-esr.*/Exec=firefox-esr --no-sandbox --disable-seccomp/' /usr/share/applications/firefox-esr.desktop
 
-      - name: Create RDP User
+      - name: Create RDP User & Fix Session
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
@@ -57,9 +54,18 @@ jobs:
           # Gives the RDP user Administrator (sudo) privileges
           sudo usermod -aG sudo RDP
           
-          # Copies the XFCE session configuration to the new RDP user so the desktop loads properly
-          sudo cp ~/.xsession /home/RDP/.xsession
+          echo "Building clean XFCE session for RDP user..."
+          # This specifically fixes the D-Bus and XDG_CONFIG_DIRS error in your screenshot
+          sudo bash -c 'cat > /home/RDP/.xsession << "EOF"
+          export XDG_SESSION_DESKTOP=xfce
+          export XDG_CURRENT_DESKTOP=XFCE
+          export XDG_CONFIG_DIRS=/etc/xdg:/etc
+          exec dbus-run-session -- startxfce4
+          EOF'
+          
+          # Lock the permissions to the RDP user
           sudo chown RDP:RDP /home/RDP/.xsession
+          sudo chmod +x /home/RDP/.xsession
 
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
@@ -106,6 +112,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Triggering next workflow run to restart the server..."
-          # Make sure 'rdp_workflow.yml' matches your actual file name!
           gh workflow run rdp_workflow.yml --repo ${{ github.repository }} --ref ${{ github.ref_name }}
           echo "✅ Restart triggered successfully!"
