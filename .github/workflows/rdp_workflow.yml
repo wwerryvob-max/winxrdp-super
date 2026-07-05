@@ -144,7 +144,7 @@ jobs:
           
           Write-Host "Time limit reached (5 hours 45 mins). Proceeding to auto-restart..."
 
-            - name: 🔄 Auto-Restart Server
+        - name: 🔄 Auto-Restart Server
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
