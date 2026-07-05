@@ -16,10 +16,16 @@ jobs:
     steps:
       - name: Install XFCE Desktop, Firefox & XRDP
         run: |
-          echo "Updating system and installing apps..."
-          sudo apt update && sudo apt upgrade -y
+          echo "Updating system..."
+          sudo apt update
           
-          # DEBIAN_FRONTEND prevents the installation from getting stuck on popups
+          # THE TRICK: Add the official Mozilla Team repository to bypass Ubuntu's Snap store
+          sudo apt install software-properties-common -y
+          sudo add-apt-repository ppa:mozillateam/ppa -y
+          sudo apt update
+          
+          # Now we can safely install the native firefox-esr alongside the desktop
+          echo "Installing XFCE and native Firefox ESR..."
           sudo DEBIAN_FRONTEND=noninteractive apt install xfce4 xfce4-goodies xrdp dbus-x11 firefox-esr -y
           
           echo "Configuring XRDP Session..."
