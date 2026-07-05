@@ -125,28 +125,32 @@ jobs:
           if ($env:GDRIVE_CONF) {
               Write-Host "Google Drive config found. Setting up rclone..."
               # Download rclone for Windows
-              Invoke-WebRequest -Uri "https://github.com/rclone/rclone/releases/latest/download/rclone-current-windows-amd64.zip" -OutFile "rclone.zip"
+              Invoke-WebRequest -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile "rclone.zip"
               Expand-Archive -Path "rclone.zip" -DestinationPath "C:\rclone" -Force
               $rcloneExe = (Get-ChildItem -Path "C:\rclone" -Recurse -Filter "rclone.exe")[0].FullName
               Copy-Item $rcloneExe "C:\Windows\System32\rclone.exe" -Force
 
               # Write rclone config
-              $rcloneConfigDir = "C:\Users\RDP\AppData\Roaming\rclone"
+              $rcloneConfigDir = "C:\Users\runneradmin\AppData\Roaming\rclone"
               New-Item -ItemType Directory -Force -Path $rcloneConfigDir | Out-Null
               $env:GDRIVE_CONF | Out-File -FilePath "$rcloneConfigDir\rclone.conf" -Encoding UTF8
 
               $BackupRemote = "gdrive"
           } elseif ($env:MEGA_USER -and $env:MEGA_PASS) {
               Write-Host "MEGA credentials found. Setting up rclone..."
-              Invoke-WebRequest -Uri "https://github.com/rclone/rclone/releases/latest/download/rclone-current-windows-amd64.zip" -OutFile "rclone.zip"
+              Invoke-WebRequest -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" -OutFile "rclone.zip"
               Expand-Archive -Path "rclone.zip" -DestinationPath "C:\rclone" -Force
               $rcloneExe = (Get-ChildItem -Path "C:\rclone" -Recurse -Filter "rclone.exe")[0].FullName
               Copy-Item $rcloneExe "C:\Windows\System32\rclone.exe" -Force
 
               # Create MEGA config
-              $rcloneConfigDir = "C:\Users\RDP\AppData\Roaming\rclone"
+              $rcloneConfigDir = "C:\Users\runneradmin\AppData\Roaming\rclone"
               New-Item -ItemType Directory -Force -Path $rcloneConfigDir | Out-Null
-              $megaConf = "[mega]`ntype = mega`nuser = $($env:MEGA_USER)`npass = $($env:MEGA_PASS)"
+              
+              # Tell rclone to obscure the plain-text password
+              $obscuredPass = (rclone obscure $env:MEGA_PASS).Trim()
+              
+              $megaConf = "[mega]`ntype = mega`nuser = $($env:MEGA_USER)`npass = $obscuredPass"
               $megaConf | Out-File -FilePath "$rcloneConfigDir\rclone.conf" -Encoding UTF8
 
               $BackupRemote = "mega"
@@ -158,6 +162,13 @@ jobs:
           echo "BACKUP_REMOTE=$BackupRemote" >> $env:GITHUB_ENV
 
           if ($BackupRemote -ne "none") {
+              Write-Host "Ensuring remote directories exist on $BackupRemote..."
+              rclone mkdir "${BackupRemote}:winrdp-backup/Mozilla" 2>$null
+              rclone mkdir "${BackupRemote}:winrdp-backup/ChromeUserData" 2>$null
+              rclone mkdir "${BackupRemote}:winrdp-backup/BraveUserData" 2>$null
+              rclone mkdir "${BackupRemote}:winrdp-backup/EdgeUserData" 2>$null
+              rclone mkdir "${BackupRemote}:winrdp-backup/SavedFiles" 2>$null
+
               Write-Host "Restoring browser profiles and SavedFiles from $BackupRemote..."
 
               # Define paths
@@ -198,7 +209,6 @@ jobs:
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
           CF_TOKEN: ${{ secrets.CF_TOKEN }}
-          BACKUP_REMOTE: ${{ env.BACKUP_REMOTE }}
         run: |
           if (-not $env:CF_TOKEN) {
               Write-Error "Error: Secret 'CF_TOKEN' is missing. Add your Cloudflare token to Secrets."
@@ -221,34 +231,19 @@ jobs:
           $endTime = (Get-Date).AddMinutes(345)
           Write-Host "Runner will stay active until $endTime"
 
-          # --- Start hourly background backup job ---
-          if ($env:BACKUP_REMOTE -ne "none" -and $env:BACKUP_REMOTE) {
-              Write-Host "Starting hourly background backup sync to $($env:BACKUP_REMOTE)..."
-              $backupJob = Start-Job -ScriptBlock {
-                  param($Remote)
-                  $UserProfile = "C:\Users\RDP"
-                  while ($true) {
-                      Start-Sleep -Seconds 3600 # 1 hour
-                      Write-Output "[$(Get-Date)] Syncing browser profiles and SavedFiles to $Remote..."
-                      rclone sync "$UserProfile\AppData\Roaming\Mozilla" "${Remote}:winrdp-backup/Mozilla" --exclude ".cache/**"
-                      rclone sync "$UserProfile\AppData\Local\Google\Chrome\User Data" "${Remote}:winrdp-backup/ChromeUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-                      rclone sync "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data" "${Remote}:winrdp-backup/BraveUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-                      rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "${Remote}:winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-                      rclone sync "C:\Users\Public\Desktop\SavedFiles" "${Remote}:winrdp-backup/SavedFiles"
-                  }
-              } -ArgumentList $env:BACKUP_REMOTE
-          }
-
           while ((Get-Date) -lt $endTime) {
               Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate early"
-              # Print any backup job output
-              if ($backupJob) { Receive-Job -Job $backupJob }
               Start-Sleep -Seconds 60
           }
           
-          Write-Host "Time limit reached (5 hours 45 mins). Proceeding to backup & auto-restart..."
+          Write-Host "Time limit reached (5 hours 45 mins). Proceeding to shutdown & backup..."
 
-          # --- Final backup before shutdown ---
+      - name: Final Cloud Backup
+        if: always()
+        env:
+          BACKUP_REMOTE: ${{ env.BACKUP_REMOTE }}
+        shell: powershell
+        run: |
           if ($env:BACKUP_REMOTE -ne "none" -and $env:BACKUP_REMOTE) {
               Write-Host "Performing final backup to $($env:BACKUP_REMOTE)..."
               $UserProfile = "C:\Users\RDP"
@@ -258,6 +253,8 @@ jobs:
               rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**"
               rclone sync "C:\Users\Public\Desktop\SavedFiles" "$($env:BACKUP_REMOTE):winrdp-backup/SavedFiles"
               Write-Host "Final backup complete."
+          } else {
+              Write-Host "No backup remote configured. Skipping final backup."
           }
 
       - name: ðŸ”„ Auto-Restart Server
