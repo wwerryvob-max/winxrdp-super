@@ -3,7 +3,6 @@ name: Linux RDP (XFCE + Cloudflare + Firefox)
 on:
   workflow_dispatch:
 
-# REQUIRED: Grants the GitHub token permission to trigger the next workflow run
 permissions:
   actions: write
   contents: read
@@ -19,7 +18,7 @@ jobs:
           echo "Updating system..."
           sudo apt update
           
-          # THE TRICK: Add the official Mozilla Team repository to bypass Ubuntu's Snap store
+          # THE TRICK: Add the official Mozilla Team repository
           sudo apt install software-properties-common -y
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
@@ -35,7 +34,7 @@ jobs:
           echo "Applying Firefox Sandbox Fix..."
           sudo sed -i 's/^Exec=firefox-esr.*/Exec=firefox-esr --no-sandbox --disable-seccomp/' /usr/share/applications/firefox-esr.desktop
 
-      - name: Create RDP User & Force Global XFCE Session
+      - name: Create RDP User & Patch XRDP Startup
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
@@ -49,27 +48,20 @@ jobs:
           echo "RDP:$MY_SECRET_PASS" | sudo chpasswd
           sudo usermod -aG sudo RDP
           
-          echo "Applying the Nuclear Fix for XRDP/XFCE..."
-          # 1. Backup the original broken Ubuntu xrdp startup script
-          sudo mv /etc/xrdp/startwm.sh /etc/xrdp/startwm.sh.bak
+          echo "Patching the global XRDP script..."
+          # Tell the global script to launch startxfce4
+          sudo sed -i.bak '/fi/a #xrdp multiple users fix \n startxfce4 \n' /etc/xrdp/startwm.sh
           
-          # 2. Write a brand new, completely clean global startup script forcing XFCE and DBUS
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"
-          #!/bin/sh
-          if [ -r /etc/default/locale ]; then
-            . /etc/default/locale
-            export LANG LANGUAGE
-          fi
-          export XDG_SESSION_DESKTOP=xfce
-          export XDG_CURRENT_DESKTOP=XFCE
-          export XDG_CONFIG_DIRS=/etc/xdg:/etc
-          exec dbus-run-session -- startxfce4
-          EOF'
+          # Comment out the default Ubuntu session execution at the bottom of the script
+          sudo sed -i 's/^test -x \/etc\/X11\/Xsession/#test -x \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
+          sudo sed -i 's/^exec \/bin\/sh \/etc\/X11\/Xsession/#exec \/bin\/sh \/etc\/X11\/Xsession/' /etc/xrdp/startwm.sh
           
-          # 3. Make it executable
-          sudo chmod +x /etc/xrdp/startwm.sh
+          echo "Creating local user configuration..."
+          echo "startxfce4" | sudo tee /home/RDP/.Xclients
+          sudo chown RDP:RDP /home/RDP/.Xclients
+          sudo chmod +x /home/RDP/.Xclients
           
-          # 4. CRITICAL: Restart XRDP so it flushes the cache and uses the new script
+          echo "Restarting XRDP service..."
           sudo systemctl restart xrdp
 
       - name: Start Cloudflare Tunnel & Maintain Connection
@@ -77,7 +69,7 @@ jobs:
           CF_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
           if [ -z "$CF_TOKEN" ]; then
-              echo "Error: Secret 'CF_TOKEN' is missing. Add your Cloudflare token to Secrets."
+              echo "Error: Secret 'CF_TOKEN' is missing."
               exit 1
           fi
 
@@ -88,10 +80,8 @@ jobs:
           echo "Installing and Starting Cloudflare Tunnel as a service..."
           sudo cloudflared service install $CF_TOKEN
           
-          # --- SECURITY SCRUB START ---
           export CF_TOKEN=""
           history -c
-          # --- SECURITY SCRUB END ---
           
           echo -e "\n=== RDP ACCESS ==="
           echo "Username: RDP"
@@ -99,9 +89,8 @@ jobs:
           echo "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
           echo -e "==================\n"
           
-          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
+          # Timer setup: Run for exactly 345 minutes
           END_TIME=$(($(date +%s) + 20700)) 
-          echo "Runner will stay active until the 5 hour 45 min mark."
           
           while [ $(date +%s) -lt $END_TIME ]; do
               echo "[$(date)] Linux RDP Active via Cloudflare - Cancel workflow to terminate early"
