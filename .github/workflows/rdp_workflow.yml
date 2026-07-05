@@ -35,7 +35,7 @@ jobs:
           echo "Applying Firefox Sandbox Fix..."
           sudo sed -i 's/^Exec=firefox-esr.*/Exec=firefox-esr --no-sandbox --disable-seccomp/' /usr/share/applications/firefox-esr.desktop
 
-      - name: Create RDP User & Fix Session
+      - name: Create RDP User & Force Global XFCE Session
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
@@ -45,27 +45,32 @@ jobs:
           fi
           
           echo "Creating RDP user..."
-          # Creates the user with a home directory (-m) and sets the default shell to bash (-s)
           sudo useradd -m -s /bin/bash RDP
-          
-          # Sets your secret password for the new RDP user
           echo "RDP:$MY_SECRET_PASS" | sudo chpasswd
-          
-          # Gives the RDP user Administrator (sudo) privileges
           sudo usermod -aG sudo RDP
           
-          echo "Building clean XFCE session for RDP user..."
-          # This specifically fixes the D-Bus and XDG_CONFIG_DIRS error in your screenshot
-          sudo bash -c 'cat > /home/RDP/.xsession << "EOF"
+          echo "Applying the Nuclear Fix for XRDP/XFCE..."
+          # 1. Backup the original broken Ubuntu xrdp startup script
+          sudo mv /etc/xrdp/startwm.sh /etc/xrdp/startwm.sh.bak
+          
+          # 2. Write a brand new, completely clean global startup script forcing XFCE and DBUS
+          sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"
+          #!/bin/sh
+          if [ -r /etc/default/locale ]; then
+            . /etc/default/locale
+            export LANG LANGUAGE
+          fi
           export XDG_SESSION_DESKTOP=xfce
           export XDG_CURRENT_DESKTOP=XFCE
           export XDG_CONFIG_DIRS=/etc/xdg:/etc
           exec dbus-run-session -- startxfce4
           EOF'
           
-          # Lock the permissions to the RDP user
-          sudo chown RDP:RDP /home/RDP/.xsession
-          sudo chmod +x /home/RDP/.xsession
+          # 3. Make it executable
+          sudo chmod +x /etc/xrdp/startwm.sh
+          
+          # 4. CRITICAL: Restart XRDP so it flushes the cache and uses the new script
+          sudo systemctl restart xrdp
 
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
@@ -95,7 +100,6 @@ jobs:
           echo -e "==================\n"
           
           # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
-          # 345 minutes = 20700 seconds
           END_TIME=$(($(date +%s) + 20700)) 
           echo "Runner will stay active until the 5 hour 45 min mark."
           
