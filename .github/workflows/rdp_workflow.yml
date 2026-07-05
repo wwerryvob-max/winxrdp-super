@@ -1,109 +1,154 @@
-name: Linux RDP (XFCE + Cloudflare + Firefox)
+name: RDP (Cloudflare + Captura + Apps)
 
 on:
   workflow_dispatch:
 
+# REQUIRED: Grants the GitHub token permission to trigger the next workflow run
 permissions:
   actions: write
   contents: read
 
 jobs:
-  ubuntu-rdp:
-    runs-on: ubuntu-latest
+  secure-rdp:
+    runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Install XFCE Desktop, Firefox & XRDP
+      - name: Configure Core RDP Settings
         run: |
-          echo "Updating system..."
-          sudo apt update
-          
-          # Install Mozilla PPA and native Firefox
-          sudo apt install software-properties-common -y
-          sudo add-apt-repository ppa:mozillateam/ppa -y
-          sudo apt update
-          
-          echo "Installing XFCE and native Firefox ESR..."
-          sudo DEBIAN_FRONTEND=noninteractive apt install xfce4 xfce4-goodies xrdp dbus-x11 firefox-esr -y
-          
-          sudo adduser xrdp ssl-cert
-          sudo systemctl enable --now xrdp
-          
-          echo "Applying Firefox Sandbox Fix..."
-          sudo sed -i 's/^Exec=firefox-esr.*/Exec=firefox-esr --no-sandbox --disable-seccomp/' /usr/share/applications/firefox-esr.desktop
+          # --- AUDIO & SESSION FIXES START HERE ---
+          Set-Service -Name Audiosrv -StartupType Automatic
+          Start-Service -Name Audiosrv
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
+          # --- FIXES END HERE ---
 
-      - name: Create RDP User & Apply Claude's Fix
+          # Enable Remote Desktop and disable Network Level Authentication
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
+
+          # Remove existing rule, then allow incoming RDP connections
+          netsh advfirewall firewall delete rule name="RDP-Tunnel"
+          netsh advfirewall firewall add rule name="RDP-Tunnel" `
+            dir=in action=allow protocol=TCP localport=3389
+
+          # Restart Remote Desktop service
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User with Secure Password
         env:
           MY_SECRET_PASS: ${{ secrets.PASS }}
         run: |
-          if [ -z "$MY_SECRET_PASS" ]; then
-              echo "Error: Secret 'PASS' is empty. Please add it in Repository Settings."
+          if (-not $env:MY_SECRET_PASS) {
+              Write-Error "Error: Secret 'PASS' is empty or missing. Please add it in Repository Settings."
               exit 1
-          fi
+          }
+
+          $password = $env:MY_SECRET_PASS
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
-          echo "Creating RDP user..."
-          sudo useradd -m -s /bin/bash RDP
-          echo "RDP:$MY_SECRET_PASS" | sudo chpasswd
-          sudo usermod -aG sudo RDP
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           
-          echo "Applying XRDP/D-Bus Initialization Fix..."
-          # Recreate global startup script without killing the system dbus daemon
-          sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"
-          #!/bin/sh
-          if [ -r /etc/default/locale ]; then
-            . /etc/default/locale
-            export LANG LANGUAGE
-          fi
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
+
+      - name: Install Apps & Fix Shortcuts
+        run: |
+          Write-Host "Installing Apps..."
           
-          unset DBUS_SESSION_BUS_ADDRESS
-          unset XDG_RUNTIME_DIR
+          # 1. Install via Chocolatey
+          choco install vb-cable -y --no-progress --ignore-checksums
+          choco install winrar -y --no-progress
+          choco install googlechrome -y --no-progress --ignore-checksums
+          choco install brave -y --no-progress
+          choco install ffmpeg -y --no-progress
+          choco install captura -y --no-progress
           
-          test -x /etc/X11/Xsession && exec /etc/X11/Xsession
-          exec /bin/sh /etc/X11/Xsession
-          EOF'
+          # 2. FIX BRAVE: Move to Public Folder
+          $BraveAdmin = "C:\Users\runneradmin\AppData\Local\BraveSoftware"
+          if (Test-Path $BraveAdmin) {
+              Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
+          }
           
-          sudo chmod +x /etc/xrdp/startwm.sh
+          # 3. FIX CAPTURA: Find and Move to Public Folder
+          $CapLoc1 = "C:\Users\runneradmin\AppData\Local\Captura"
+          $CapLoc2 = "C:\ProgramData\chocolatey\lib\captura\tools"
           
-          echo "xfce4-session" | sudo tee /home/RDP/.xsession
-          sudo chown RDP:RDP /home/RDP/.xsession
+          if (Test-Path $CapLoc1) {
+              Copy-Item -Path $CapLoc1 -Destination "C:\" -Recurse -Force
+              Rename-Item -Path "C:\Captura" -NewName "Captura_App" -ErrorAction SilentlyContinue
+              Rename-Item -Path "C:\Captura_App" -NewName "Captura"
+          }
+          elseif (Test-Path $CapLoc2) {
+              Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
+          }
           
-          echo "Restarting XRDP services..."
-          sudo systemctl restart xrdp xrdp-sesman
+          # 4. Create Desktop Shortcuts
+          $WshShell = New-Object -comObject WScript.Shell
+          
+          # Brave
+          $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
+          $BraveLnk.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
+          $BraveLnk.Save()
+          
+          # Captura
+          $CapturaLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Captura.lnk")
+          $CapturaLnk.TargetPath = "C:\Captura\Captura.exe"
+          $CapturaLnk.WorkingDirectory = "C:\Captura"
+          $CapturaLnk.Save()
+
+          # WinRAR
+          $RarLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\WinRAR.lnk")
+          $RarLnk.TargetPath = "C:\Program Files\WinRAR\WinRAR.exe"
+          $RarLnk.Save()
+          
+          Write-Host "Installation and Shortcuts Complete."
 
       - name: Start Cloudflare Tunnel & Maintain Connection
         env:
           CF_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
-          if [ -z "$CF_TOKEN" ]; then
-              echo "Error: Secret 'CF_TOKEN' is missing."
+          if (-not $env:CF_TOKEN) {
+              Write-Error "Error: Secret 'CF_TOKEN' is missing. Add your Cloudflare token to Secrets."
               exit 1
-          fi
+          }
 
-          echo "Downloading Cloudflared for Linux..."
-          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared.deb
+          Write-Host "Downloading Cloudflared for Windows..."
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           
-          echo "Installing and Starting Cloudflare Tunnel..."
-          sudo cloudflared service install $CF_TOKEN
+          Write-Host "Installing and Starting Cloudflare Tunnel as a service..."
+          .\cloudflared.exe service install $env:CF_TOKEN
           
-          export CF_TOKEN=""
-          history -c
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Username: RDP"
+          Write-Host "Password: (Hidden - Check your Secrets)"
+          Write-Host "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
+          Write-Host "==================`n"
           
-          echo -e "\n=== RDP ACCESS ==="
-          echo "Username: RDP"
-          echo "Password: (Hidden - Check your Secrets)"
-          echo -e "==================\n"
+          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
+          $endTime = (Get-Date).AddMinutes(345)
+          Write-Host "Runner will stay active until $endTime"
           
-          END_TIME=$(($(date +%s) + 20700)) 
-          while [ $(date +%s) -lt $END_TIME ]; do
-              echo "[$(date)] Linux RDP Active - Session time remaining..."
-              sleep 300
-          done
+          while ((Get-Date) -lt $endTime) {
+              Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate early"
+              Start-Sleep -Seconds 300
+          }
+          
+          Write-Host "Time limit reached (5 hours 45 mins). Proceeding to auto-restart..."
 
-      - name: 🔄 Auto-Restart Server
+      - name: ðŸ”„ Auto-Restart Server
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next workflow run..."
+          Write-Host "Triggering next workflow run to restart the server..."
           gh workflow run rdp_workflow.yml --repo ${{ github.repository }} --ref ${{ github.ref_name }}
+          Write-Host "âœ… Restart triggered successfully!"
