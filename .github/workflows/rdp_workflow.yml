@@ -18,16 +18,14 @@ jobs:
           echo "Updating system..."
           sudo apt update
           
-          # THE TRICK: Add the official Mozilla Team repository
+          # Install Mozilla PPA and native Firefox
           sudo apt install software-properties-common -y
           sudo add-apt-repository ppa:mozillateam/ppa -y
           sudo apt update
           
-          # Install the desktop environment and native Firefox ESR
           echo "Installing XFCE and native Firefox ESR..."
           sudo DEBIAN_FRONTEND=noninteractive apt install xfce4 xfce4-goodies xrdp dbus-x11 firefox-esr -y
           
-          # Enable XRDP service
           sudo adduser xrdp ssl-cert
           sudo systemctl enable --now xrdp
           
@@ -48,8 +46,8 @@ jobs:
           echo "RDP:$MY_SECRET_PASS" | sudo chpasswd
           sudo usermod -aG sudo RDP
           
-          echo "Applying Claude's XRDP/D-Bus Fix..."
-          # Recreate the global startup script exactly as Claude specified
+          echo "Applying XRDP/D-Bus Initialization Fix..."
+          # Recreate global startup script without killing the system dbus daemon
           sudo bash -c 'cat > /etc/xrdp/startwm.sh << "EOF"
           #!/bin/sh
           if [ -r /etc/default/locale ]; then
@@ -66,12 +64,10 @@ jobs:
           
           sudo chmod +x /etc/xrdp/startwm.sh
           
-          # Tell the session manager to use XFCE4
           echo "xfce4-session" | sudo tee /home/RDP/.xsession
           sudo chown RDP:RDP /home/RDP/.xsession
           
-          echo "Restarting DBus and XRDP services..."
-          sudo systemctl restart dbus
+          echo "Restarting XRDP services..."
           sudo systemctl restart xrdp xrdp-sesman
 
       - name: Start Cloudflare Tunnel & Maintain Connection
@@ -87,36 +83,27 @@ jobs:
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
           
-          echo "Installing and Starting Cloudflare Tunnel as a service..."
+          echo "Installing and Starting Cloudflare Tunnel..."
           sudo cloudflared service install $CF_TOKEN
           
-          # --- SECURITY SCRUB START ---
           export CF_TOKEN=""
           history -c
-          # --- SECURITY SCRUB END ---
           
           echo -e "\n=== RDP ACCESS ==="
           echo "Username: RDP"
           echo "Password: (Hidden - Check your Secrets)"
-          echo "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
           echo -e "==================\n"
           
-          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
           END_TIME=$(($(date +%s) + 20700)) 
-          echo "Runner will stay active until the 5 hour 45 min mark."
-          
           while [ $(date +%s) -lt $END_TIME ]; do
-              echo "[$(date)] Linux RDP Active via Cloudflare - Cancel workflow to terminate early"
+              echo "[$(date)] Linux RDP Active - Session time remaining..."
               sleep 300
           done
-          
-          echo "Time limit reached (5 hours 45 mins). Proceeding to auto-restart..."
 
       - name: 🔄 Auto-Restart Server
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Triggering next workflow run to restart the server..."
+          echo "Triggering next workflow run..."
           gh workflow run rdp_workflow.yml --repo ${{ github.repository }} --ref ${{ github.ref_name }}
-          echo "✅ Restart triggered successfully!"
