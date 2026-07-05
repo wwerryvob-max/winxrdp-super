@@ -144,11 +144,11 @@ jobs:
           
           Write-Host "Time limit reached (5 hours 45 mins). Proceeding to auto-restart..."
 
-      - name: 🔄 Auto-Restart Server
+            - name: 🔄 Auto-Restart Server
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Write-Host "Triggering next workflow run to restart the server..."
-          gh workflow run rdp_workflow.yml --ref ${{ github.ref_name }}
+          gh workflow run rdp_workflow.yml --repo ${{ github.repository }} --ref ${{ github.ref_name }}
           Write-Host "✅ Restart triggered successfully!"
