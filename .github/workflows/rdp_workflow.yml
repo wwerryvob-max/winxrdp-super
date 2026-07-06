@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
+          # --- SET TIMEZONE TO IST ---
+          Set-TimeZone -Id "India Standard Time"
+
           # --- AUDIO & SESSION FIXES START HERE ---
           Set-Service -Name Audiosrv -StartupType Automatic
           Start-Service -Name Audiosrv
