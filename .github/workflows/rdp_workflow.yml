@@ -116,44 +116,44 @@ jobs:
           # 5. Create Auto-Wallpaper Script (With 100% Quality Fix), Snipping Tool, and Dark Mode
           Write-Host "Setting up Auto-Wallpaper restore, Snipping Tool fix, and Dark Mode..."
           $WallCode = @'
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
-Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
-
-$ScreenshotDir = "$env:USERPROFILE\Pictures\Screenshots"
-New-Item -ItemType Directory -Force -Path $ScreenshotDir -ErrorAction SilentlyContinue | Out-Null
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -Name "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" -Value "%USERPROFILE%\Pictures\Screenshots" -Type ExpandString -Force -ErrorAction SilentlyContinue
-
-$imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"
-if (Test-Path $imgPath) {
-    Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"
-    [W]::SystemParametersInfo(20, 0, $imgPath, 3)
-}
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Clip { [DllImport(""user32.dll"")] public static extern uint GetClipboardSequenceNumber(); }"
-
-$lastSeq = [Clip]::GetClipboardSequenceNumber()
-while ($true) {
-    Start-Sleep -Milliseconds 500
-    $seq = [Clip]::GetClipboardSequenceNumber()
-    if ($seq -ne $lastSeq) {
-        $lastSeq = $seq
-        if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
-            try {
-                $img = [System.Windows.Forms.Clipboard]::GetImage()
-                if ($img) {
-                    $timestamp = (Get-Date).ToString("yyyy-MM-dd HH_mm_ss")
-                    $savePath = Join-Path $ScreenshotDir "Screenshot $timestamp.png"
-                    $img.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png)
-                    $img.Dispose()
-                }
-            } catch {}
-        }
-    }
-}
-'@
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
+          
+          $ScreenshotDir = "$env:USERPROFILE\Pictures\Screenshots"
+          New-Item -ItemType Directory -Force -Path $ScreenshotDir -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -Name "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" -Value "%USERPROFILE%\Pictures\Screenshots" -Type ExpandString -Force -ErrorAction SilentlyContinue
+          
+          $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"
+          if (Test-Path $imgPath) {
+              Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"
+              [W]::SystemParametersInfo(20, 0, $imgPath, 3)
+          }
+          
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Clip { [DllImport(""user32.dll"")] public static extern uint GetClipboardSequenceNumber(); }"
+          
+          $lastSeq = [Clip]::GetClipboardSequenceNumber()
+          while ($true) {
+              Start-Sleep -Milliseconds 500
+              $seq = [Clip]::GetClipboardSequenceNumber()
+              if ($seq -ne $lastSeq) {
+                  $lastSeq = $seq
+                  if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+                      try {
+                          $img = [System.Windows.Forms.Clipboard]::GetImage()
+                          if ($img) {
+                              $timestamp = (Get-Date).ToString("yyyy-MM-dd HH_mm_ss")
+                              $savePath = Join-Path $ScreenshotDir "Screenshot $timestamp.png"
+                              $img.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png)
+                              $img.Dispose()
+                          }
+                      } catch {}
+                  }
+              }
+          }
+          '@
           $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
           
           $StartupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
