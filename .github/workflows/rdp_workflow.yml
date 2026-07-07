@@ -161,12 +161,12 @@ jobs:
           # 6. Apply Default User Registry Settings (Dark Mode, Screenshots Folder)
           Write-Host "Applying Default User Registry Settings..."
           reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" | Out-Null
-          Set-ItemProperty -Path "HKU:\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKU:\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKU:\DefaultUser\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
+          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d 0 /f | Out-Null
+          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d 0 /f | Out-Null
+          reg add "HKU\DefaultUser\Control Panel\Desktop" /v "JPEGImportQuality" /t REG_DWORD /d 100 /f | Out-Null
           
           New-Item -ItemType Directory -Force -Path "C:\Users\Default\Pictures\Screenshots" -ErrorAction SilentlyContinue | Out-Null
-          Set-ItemProperty -Path "HKU:\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -Name "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" -Value "%USERPROFILE%\Pictures\Screenshots" -Type ExpandString -Force -ErrorAction SilentlyContinue
+          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" /v "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" /t REG_EXPAND_SZ /d "%USERPROFILE%\Pictures\Screenshots" /f | Out-Null
           
           reg unload "HKU\DefaultUser" | Out-Null
 
