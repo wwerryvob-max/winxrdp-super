@@ -119,39 +119,44 @@ jobs:
 
           # 5. Create Auto-Wallpaper Script and Background Snipping Tool Fix
           Write-Host "Setting up Auto-Wallpaper restore and Snipping Tool monitor..."
-          $ps1 = "C:\Users\Public\SetWallpaper.ps1"
-          Set-Content -Path $ps1 -Encoding utf8 -Value '$imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"'
-          Add-Content -Path $ps1 -Encoding utf8 -Value 'if (Test-Path $imgPath) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    [W]::SystemParametersInfo(20, 0, $imgPath, 3)'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '}'
-          Add-Content -Path $ps1 -Encoding utf8 -Value 'Add-Type -AssemblyName System.Windows.Forms'
-          Add-Content -Path $ps1 -Encoding utf8 -Value 'Add-Type -AssemblyName System.Drawing'
-          Add-Content -Path $ps1 -Encoding utf8 -Value 'Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Clip { [DllImport(""user32.dll"")] public static extern uint GetClipboardSequenceNumber(); }"'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '$ScreenshotDir = "$env:USERPROFILE\Pictures\Screenshots"'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '$lastSeq = [Clip]::GetClipboardSequenceNumber()'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '$lastSaveTime = [DateTime]::MinValue'
-          Add-Content -Path $ps1 -Encoding utf8 -Value 'while ($true) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    Start-Sleep -Milliseconds 500'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    $seq = [Clip]::GetClipboardSequenceNumber()'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    if ($seq -ne $lastSeq) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '        $lastSeq = $seq'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '        if ([System.Windows.Forms.Clipboard]::ContainsImage()) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '            if ((Get-Date) - $lastSaveTime -gt [TimeSpan]::FromSeconds(2)) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                $lastSaveTime = Get-Date'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                try {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                    $img = [System.Windows.Forms.Clipboard]::GetImage()'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                    if ($img) {'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                        $timestamp = (Get-Date).ToString("yyyy-MM-dd HH_mm_ss")'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                        $savePath = Join-Path $ScreenshotDir "Screenshot $timestamp.png"'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                        $img.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png)'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                        $img.Dispose()'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                    }'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '                } catch {}'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '            }'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '        }'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '    }'
-          Add-Content -Path $ps1 -Encoding utf8 -Value '}'
+          $WallCode = @'
+          $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"
+          if (Test-Path $imgPath) {
+              Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"
+              [W]::SystemParametersInfo(20, 0, $imgPath, 3)
+          }
+          
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Clip { [DllImport(""user32.dll"")] public static extern uint GetClipboardSequenceNumber(); }"
+          
+          $ScreenshotDir = "$env:USERPROFILE\Pictures\Screenshots"
+          $lastSeq = [Clip]::GetClipboardSequenceNumber()
+          $lastSaveTime = [DateTime]::MinValue
+          
+          while ($true) {
+              Start-Sleep -Milliseconds 500
+              $seq = [Clip]::GetClipboardSequenceNumber()
+              if ($seq -ne $lastSeq) {
+                  $lastSeq = $seq
+                  if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+                      if ((Get-Date) - $lastSaveTime -gt [TimeSpan]::FromSeconds(2)) {
+                          $lastSaveTime = Get-Date
+                          try {
+                              $img = [System.Windows.Forms.Clipboard]::GetImage()
+                              if ($img) {
+                                  $timestamp = (Get-Date).ToString("yyyy-MM-dd HH_mm_ss")
+                                  $savePath = Join-Path $ScreenshotDir "Screenshot $timestamp.png"
+                                  $img.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png)
+                                  $img.Dispose()
+                              }
+                          } catch {}
+                      }
+                  }
+              }
+          }
+          '@
+          $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
           
           # 6. Apply Default User Registry Settings (Dark Mode, Screenshots Folder)
           Write-Host "Applying Default User Registry Settings..."
