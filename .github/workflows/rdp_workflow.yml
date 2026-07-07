@@ -113,9 +113,9 @@ jobs:
           $RarLnk.TargetPath = "C:\Program Files\WinRAR\WinRAR.exe"
           $RarLnk.Save()
           
-          # 5. Create Auto-Wallpaper Script (With 100% Quality Fix)
-          Write-Host "Setting up Auto-Wallpaper restore..."
-          $WallCode = 'Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue; $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"; if (Test-Path $imgPath) { Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(\"user32.dll\")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"; [W]::SystemParametersInfo(20, 0, $imgPath, 3) }'
+          # 5. Create Auto-Wallpaper Script (With 100% Quality Fix) & Fix Snipping Tool
+          Write-Host "Setting up Auto-Wallpaper restore and Snipping Tool fix..."
+          $WallCode = 'Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Pictures\Screenshots" -ErrorAction SilentlyContinue | Out-Null; Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" -Name "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" -Value "%USERPROFILE%\Pictures\Screenshots" -Type ExpandString -Force -ErrorAction SilentlyContinue; $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"; if (Test-Path $imgPath) { Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"; [W]::SystemParametersInfo(20, 0, $imgPath, 3) }'
           $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
           
           $StartupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
