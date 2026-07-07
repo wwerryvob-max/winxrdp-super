@@ -115,7 +115,7 @@ jobs:
           
           # 5. Create Auto-Wallpaper Script (With 100% Quality Fix), Snipping Tool, and Dark Mode
           Write-Host "Setting up Auto-Wallpaper restore, Snipping Tool fix, and Dark Mode..."
-          $WallCode = @'
+          $WallCode = '
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0 -Force -ErrorAction SilentlyContinue
           Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
@@ -153,7 +153,7 @@ jobs:
                   }
               }
           }
-          '@
+          '
           $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
           
           $StartupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
