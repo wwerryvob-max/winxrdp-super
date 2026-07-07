@@ -113,6 +113,14 @@ jobs:
           $RarLnk.TargetPath = "C:\Program Files\WinRAR\WinRAR.exe"
           $RarLnk.Save()
           
+          # 5. Create Auto-Wallpaper Script (With 100% Quality Fix)
+          Write-Host "Setting up Auto-Wallpaper restore..."
+          $WallCode = 'Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue; $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"; if (Test-Path $imgPath) { Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(\"user32.dll\")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"; [W]::SystemParametersInfo(20, 0, $imgPath, 3) }'
+          $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
+          
+          $StartupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+          "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\SetWallpaper.ps1`"" | Out-File "$StartupFolder\ApplyWall.bat" -Encoding ascii
+          
           Write-Host "Installation and Shortcuts Complete."
 
       - name: Setup Cloud Backup & Restore Session
@@ -254,6 +262,9 @@ jobs:
         shell: powershell
         run: |
           if ($env:BACKUP_REMOTE -ne "none" -and $env:BACKUP_REMOTE) {
+              Write-Host "Saving active desktop wallpaper..."
+              Copy-Item "C:\Users\RDP\AppData\Roaming\Microsoft\Windows\Themes\TranscodedWallpaper" "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg" -Force -ErrorAction SilentlyContinue
+
               Write-Host "Performing final backup to $($env:BACKUP_REMOTE)..."
               $UserProfile = "C:\Users\RDP"
               rclone sync "$UserProfile\AppData\Roaming\Mozilla" "$($env:BACKUP_REMOTE):winrdp-backup/Mozilla" --exclude ".cache/**"
