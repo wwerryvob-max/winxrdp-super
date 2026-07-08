@@ -104,9 +104,6 @@ jobs:
           choco install irfanview -y --no-progress
           choco install vlc -y --no-progress
           
-          # Download Tool to set Chrome as Default Browser
-          Invoke-WebRequest -Uri "https://kolbicz.github.io/SetUserFTA/SetUserFTA.exe" -OutFile "C:\Users\Public\SetUserFTA.exe" -UseBasicParsing
-
           # 2. FIX IMAGE VIEWER FOR ALL USERS (Force IrfanView instead of Paint)
           $IrfanPath = "C:\Program Files\IrfanView\i_view64.exe"
           cmd.exe /c "assoc .png=IrfanView.Image"
@@ -158,16 +155,10 @@ jobs:
           $BatCode | Out-File "C:\Users\Public\Desktop\Leave-RDP.bat" -Encoding ascii
 
           # 6. Create Auto-Startup Script for RDP User
-          Write-Host "Setting up User Startup script (Dark Mode, Wallpaper, Chrome Default)..."
+          Write-Host "Setting up User Startup script (Dark Mode, Wallpaper)..."
           $ScriptPath = "C:\Users\Public\UserStartup.ps1"
           
           @'
-          # --- SET GOOGLE CHROME AS DEFAULT BROWSER ---
-          C:\Users\Public\SetUserFTA.exe http ChromeHTML
-          C:\Users\Public\SetUserFTA.exe https ChromeHTML
-          C:\Users\Public\SetUserFTA.exe .htm ChromeHTML
-          C:\Users\Public\SetUserFTA.exe .html ChromeHTML
-
           # --- FORCE DARK MODE FOR RDP USER ---
           $ThemePath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           if (-not (Test-Path $ThemePath)) { New-Item -Path $ThemePath -Force | Out-Null }
