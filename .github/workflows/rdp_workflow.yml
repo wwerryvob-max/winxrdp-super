@@ -72,6 +72,30 @@ jobs:
           
           # 1. Install via Chocolatey
           choco install vb-cable -y --no-progress --ignore-checksums
+          
+          # --- FORCE INITIALIZE AUDIO DRIVER & SETUP LOOPBACK ---
+          Write-Host "Initializing Virtual Audio Cables & Splitter..."
+          pnputil /scan-devices
+          Start-Sleep -Seconds 2
+          Restart-Service -Name Audiosrv -Force
+          Start-Sleep -Seconds 2
+          
+          $CapturePath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture"
+          if (Test-Path $CapturePath) {
+              $Devices = Get-ChildItem -Path $CapturePath -ErrorAction SilentlyContinue
+              foreach ($Dev in $Devices) {
+                  $PropPath = "$($Dev.PSPath)\Properties"
+                  if (Test-Path $PropPath) {
+                      $Name = (Get-ItemProperty -Path $PropPath -Name "{a45c254e-df1c-4efd-8020-67d146a850e0},2" -ErrorAction SilentlyContinue)."{a45c254e-df1c-4efd-8020-67d146a850e0},2"
+                      if ($Name -match "CABLE Output") {
+                          # Enable "Listen to this device" for the Virtual Mic
+                          Set-ItemProperty -Path $PropPath -Name "{24dbb0fc-9311-4b3d-9cf0-18ff155639d4},1" -Value 1 -Type DWord -Force
+                      }
+                  }
+              }
+          }
+          # ------------------------------------------------------
+          
           choco install winrar -y --no-progress
           choco install googlechrome -y --no-progress --ignore-checksums
           choco install brave -y --no-progress
@@ -80,6 +104,9 @@ jobs:
           choco install irfanview -y --no-progress
           choco install vlc -y --no-progress
           
+          # Download Tool to set Chrome as Default Browser
+          Invoke-WebRequest -Uri "https://kolbicz.github.io/SetUserFTA/SetUserFTA.exe" -OutFile "C:\Users\Public\SetUserFTA.exe" -UseBasicParsing
+
           # 2. FIX IMAGE VIEWER FOR ALL USERS (Force IrfanView instead of Paint)
           $IrfanPath = "C:\Program Files\IrfanView\i_view64.exe"
           cmd.exe /c "assoc .png=IrfanView.Image"
@@ -106,7 +133,7 @@ jobs:
               Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
           }
           
-          # 5. Create Desktop Shortcuts
+          # 5. Create Desktop Shortcuts & Keep-Alive Script
           $WshShell = New-Object -comObject WScript.Shell
           
           $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
@@ -126,11 +153,21 @@ jobs:
           }
           $RarLnk.Save()
 
+          # --- CREATE THE LEAVE-RDP SCRIPT ---
+          $BatCode = "@echo off`necho Disconnecting in 3 seconds... Keep your Discord stream active!`ntimeout /t 3 /nobreak >nul`ntscon %sessionname% /dest:console"
+          $BatCode | Out-File "C:\Users\Public\Desktop\Leave-RDP.bat" -Encoding ascii
+
           # 6. Create Auto-Startup Script for RDP User
-          Write-Host "Setting up User Startup script (Dark Mode, Wallpaper)..."
+          Write-Host "Setting up User Startup script (Dark Mode, Wallpaper, Chrome Default)..."
           $ScriptPath = "C:\Users\Public\UserStartup.ps1"
           
           @'
+          # --- SET GOOGLE CHROME AS DEFAULT BROWSER ---
+          C:\Users\Public\SetUserFTA.exe http ChromeHTML
+          C:\Users\Public\SetUserFTA.exe https ChromeHTML
+          C:\Users\Public\SetUserFTA.exe .htm ChromeHTML
+          C:\Users\Public\SetUserFTA.exe .html ChromeHTML
+
           # --- FORCE DARK MODE FOR RDP USER ---
           $ThemePath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
           if (-not (Test-Path $ThemePath)) { New-Item -Path $ThemePath -Force | Out-Null }
