@@ -81,11 +81,7 @@ jobs:
           
           # --- FORCE INITIALIZE AUDIO DRIVER & SETUP LOOPBACK ---
           Write-Host "Initializing Virtual Audio Cables & Splitter..."
-          # Chocolatey often fails to actually install the driver on Server 2022. We force it here:
-          $VBCableSetup = "C:\ProgramData\chocolatey\lib\vb-cable\tools\VBCABLE_Setup_x64.exe"
-          if (Test-Path $VBCableSetup) { 
-              Start-Process $VBCableSetup -ArgumentList "-i", "-h" -Wait -NoNewWindow 
-          }
+          # Fix: Removed the EXE execution that caused the hang. Chocolatey installed the files, we just need to scan and restart services!
           pnputil /scan-devices
           Start-Sleep -Seconds 2
           Restart-Service -Name AudioEndpointBuilder -Force
@@ -162,7 +158,7 @@ jobs:
           }
           $RarLnk.Save()
 
-          # --- CREATE THE LEAVE-RDP SCRIPT (ADVANCED DYNAMIC ID) ---
+          # --- CREATE THE LEAVE-RDP SCRIPT (FULLY DYNAMIC) ---
           $BatCode = @'
           @echo off
           net session >nul 2>&1
@@ -175,7 +171,7 @@ jobs:
           echo Please switch to your Discord window now!
           echo =======================================================
           timeout /t 3 /nobreak >nul
-          powershell -Command "$id = (Get-Process -PID $PID).SessionId; tscon $id /dest:console"
+          powershell -Command "$session = qwinsta | Select-String 'Active'; if ($session) { $id = (-split $session)[2]; tscon $id /dest:console }"
           '@
           $BatCode | Out-File "C:\Users\Public\Desktop\Leave-RDP.bat" -Encoding ascii
 
