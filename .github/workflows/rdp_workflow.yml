@@ -137,6 +137,9 @@ jobs:
           Set-ItemProperty -Path $ThemePath -Name "AppsUseLightTheme" -Value 0 -Type DWord -Force
           Set-ItemProperty -Path $ThemePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord -Force
 
+          # Restart Explorer so the Taskbar turns dark instantly
+          Stop-Process -Name explorer -Force
+
           # --- RESTORE WALLPAPER ---
           Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
           $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"
