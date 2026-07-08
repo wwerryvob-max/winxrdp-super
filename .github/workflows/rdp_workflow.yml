@@ -20,9 +20,15 @@ jobs:
           Set-TimeZone -Id "India Standard Time"
 
           # --- AUDIO & SESSION FIXES START HERE ---
+          Set-Service -Name AudioEndpointBuilder -StartupType Automatic
+          Start-Service -Name AudioEndpointBuilder
           Set-Service -Name Audiosrv -StartupType Automatic
           Start-Service -Name Audiosrv
+          
+          # Force RDP to allow Audio Capture/Microphone visibility globally
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fDisableAudioCapture" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force
+          
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MaxDisconnectionTime" -Value 0 -Force
           
           # --- FIX TEMPORARY PAGING FILE WARNING POPUP ---
@@ -75,8 +81,14 @@ jobs:
           
           # --- FORCE INITIALIZE AUDIO DRIVER & SETUP LOOPBACK ---
           Write-Host "Initializing Virtual Audio Cables & Splitter..."
+          # Chocolatey often fails to actually install the driver on Server 2022. We force it here:
+          $VBCableSetup = "C:\ProgramData\chocolatey\lib\vb-cable\tools\VBCABLE_Setup_x64.exe"
+          if (Test-Path $VBCableSetup) { 
+              Start-Process $VBCableSetup -ArgumentList "-i", "-h" -Wait -NoNewWindow 
+          }
           pnputil /scan-devices
           Start-Sleep -Seconds 2
+          Restart-Service -Name AudioEndpointBuilder -Force
           Restart-Service -Name Audiosrv -Force
           Start-Sleep -Seconds 2
           
@@ -150,8 +162,21 @@ jobs:
           }
           $RarLnk.Save()
 
-          # --- CREATE THE LEAVE-RDP SCRIPT ---
-          $BatCode = "@echo off`necho Disconnecting in 3 seconds... Keep your Discord stream active!`ntimeout /t 3 /nobreak >nul`ntscon %sessionname% /dest:console"
+          # --- CREATE THE LEAVE-RDP SCRIPT (ADVANCED DYNAMIC ID) ---
+          $BatCode = @'
+          @echo off
+          net session >nul 2>&1
+          if %errorLevel% NEQ 0 (
+              powershell -Command "Start-Process '%~f0' -Verb RunAs"
+              exit /b
+          )
+          echo =======================================================
+          echo Disconnecting in 3 seconds... 
+          echo Please switch to your Discord window now!
+          echo =======================================================
+          timeout /t 3 /nobreak >nul
+          powershell -Command "$id = (Get-Process -PID $PID).SessionId; tscon $id /dest:console"
+          '@
           $BatCode | Out-File "C:\Users\Public\Desktop\Leave-RDP.bat" -Encoding ascii
 
           # 6. Create Auto-Startup Script for RDP User
