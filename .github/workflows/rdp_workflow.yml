@@ -80,13 +80,20 @@ jobs:
           choco install irfanview -y --no-progress
           choco install vlc -y --no-progress
           
-          # 2. FIX BRAVE: Move to Public Folder
+          # 2. FIX IMAGE VIEWER FOR ALL USERS (Force IrfanView instead of Paint)
+          $IrfanPath = "C:\Program Files\IrfanView\i_view64.exe"
+          cmd.exe /c "assoc .png=IrfanView.Image"
+          cmd.exe /c "assoc .jpg=IrfanView.Image"
+          cmd.exe /c "assoc .jpeg=IrfanView.Image"
+          cmd.exe /c "ftype IrfanView.Image=`"$IrfanPath`" `"%1`""
+
+          # 3. FIX BRAVE: Move to Public Folder
           $BraveAdmin = "C:\Users\runneradmin\AppData\Local\BraveSoftware"
           if (Test-Path $BraveAdmin) {
               Copy-Item -Path $BraveAdmin -Destination "C:\" -Recurse -Force
           }
           
-          # 3. FIX CAPTURA: Find and Move to Public Folder
+          # 4. FIX CAPTURA: Find and Move to Public Folder
           $CapLoc1 = "C:\Users\runneradmin\AppData\Local\Captura"
           $CapLoc2 = "C:\ProgramData\chocolatey\lib\captura\tools"
           
@@ -99,21 +106,18 @@ jobs:
               Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
           }
           
-          # 4. Create Desktop Shortcuts
+          # 5. Create Desktop Shortcuts
           $WshShell = New-Object -comObject WScript.Shell
           
-          # Brave
           $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
           $BraveLnk.TargetPath = "C:\BraveSoftware\Brave-Browser\Application\brave.exe"
           $BraveLnk.Save()
           
-          # Captura
           $CapturaLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Captura.lnk")
           $CapturaLnk.TargetPath = "C:\Captura\Captura.exe"
           $CapturaLnk.WorkingDirectory = "C:\Captura"
           $CapturaLnk.Save()
 
-          # WinRAR
           $RarLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\WinRAR.lnk")
           if (Test-Path "C:\Program Files\WinRAR\WinRAR.exe") {
               $RarLnk.TargetPath = "C:\Program Files\WinRAR\WinRAR.exe"
@@ -122,73 +126,31 @@ jobs:
           }
           $RarLnk.Save()
 
-          # 5. Create Auto-Wallpaper Script and Background Snipping Tool Fix
-          Write-Host "Setting up Auto-Wallpaper restore and Snipping Tool monitor..."
-          $WallCode = @'
+          # 6. Create Auto-Startup Script for RDP User
+          Write-Host "Setting up User Startup script (Dark Mode, Wallpaper)..."
+          $ScriptPath = "C:\Users\Public\UserStartup.ps1"
+          
+          @'
+          # --- FORCE DARK MODE FOR RDP USER ---
+          $ThemePath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+          if (-not (Test-Path $ThemePath)) { New-Item -Path $ThemePath -Force | Out-Null }
+          Set-ItemProperty -Path $ThemePath -Name "AppsUseLightTheme" -Value 0 -Type DWord -Force
+          Set-ItemProperty -Path $ThemePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord -Force
+
+          # --- RESTORE WALLPAPER ---
+          Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "JPEGImportQuality" -Value 100 -Type DWord -Force -ErrorAction SilentlyContinue
           $imgPath = "C:\Users\Public\Desktop\SavedFiles\MyWallpaper.jpg"
           if (Test-Path $imgPath) {
-              Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(""user32.dll"")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"
+              Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class W { [DllImport(\"user32.dll\")] public static extern int SystemParametersInfo(int a, int b, string c, int d); }"
               [W]::SystemParametersInfo(20, 0, $imgPath, 3)
           }
+          '@ | Out-File $ScriptPath -Encoding utf8
           
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
-          Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Clip { [DllImport(""user32.dll"")] public static extern uint GetClipboardSequenceNumber(); }"
-          
-          $ScreenshotDir = "$env:USERPROFILE\Pictures\Screenshots"
-          $lastSeq = [Clip]::GetClipboardSequenceNumber()
-          $lastSaveTime = [DateTime]::MinValue
-          
-          while ($true) {
-              Start-Sleep -Milliseconds 500
-              $seq = [Clip]::GetClipboardSequenceNumber()
-              if ($seq -ne $lastSeq) {
-                  $lastSeq = $seq
-                  if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
-                      if ((Get-Date) - $lastSaveTime -gt [TimeSpan]::FromSeconds(2)) {
-                          $lastSaveTime = Get-Date
-                          try {
-                              $img = [System.Windows.Forms.Clipboard]::GetImage()
-                              if ($img) {
-                                  $timestamp = (Get-Date).ToString("yyyy-MM-dd HH_mm_ss")
-                                  $savePath = Join-Path $ScreenshotDir "Screenshot $timestamp.png"
-                                  $img.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png)
-                                  $img.Dispose()
-                              }
-                          } catch {}
-                      }
-                  }
-              }
-          }
-          '@
-          $WallCode | Out-File "C:\Users\Public\SetWallpaper.ps1" -Encoding utf8
-          
-          # 6. Apply Default User Registry Settings (Dark Mode, Screenshots Folder, Classic Photo Viewer)
-          Write-Host "Applying Default User Registry Settings & Media Fixes..."
-          
-          # Restore Classic Windows Photo Viewer
-          $WPVPath = "HKLM:\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations"
-          New-Item -Path $WPVPath -Force -ErrorAction SilentlyContinue | Out-Null
-          Set-ItemProperty -Path $WPVPath -Name ".jpg" -Value "PhotoViewer.FileAssoc.Tiff"
-          Set-ItemProperty -Path $WPVPath -Name ".jpeg" -Value "PhotoViewer.FileAssoc.Tiff"
-          Set-ItemProperty -Path $WPVPath -Name ".png" -Value "PhotoViewer.FileAssoc.Tiff"
-          Set-ItemProperty -Path $WPVPath -Name ".bmp" -Value "PhotoViewer.FileAssoc.Tiff"
-          Set-ItemProperty -Path $WPVPath -Name ".ico" -Value "PhotoViewer.FileAssoc.Tiff"
-
-          reg load "HKU\DefaultUser" "C:\Users\Default\NTUSER.DAT" | Out-Null
-          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v "AppsUseLightTheme" /t REG_DWORD /d 0 /f | Out-Null
-          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v "SystemUsesLightTheme" /t REG_DWORD /d 0 /f | Out-Null
-          reg add "HKU\DefaultUser\Control Panel\Desktop" /v "JPEGImportQuality" /t REG_DWORD /d 100 /f | Out-Null
-          
-          New-Item -ItemType Directory -Force -Path "C:\Users\Default\Pictures\Screenshots" -ErrorAction SilentlyContinue | Out-Null
-          reg add "HKU\DefaultUser\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders" /v "{B7BEDE81-DF94-4682-A7D8-57A52620B86F}" /t REG_EXPAND_SZ /d "%USERPROFILE%\Pictures\Screenshots" /f | Out-Null
-          
-          reg unload "HKU\DefaultUser" | Out-Null
-
+          # Launch the script silently when user logs in
           $StartupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-          "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"C:\Users\Public\SetWallpaper.ps1`"" | Out-File "$StartupFolder\ApplyWall.bat" -Encoding ascii
+          "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`"" | Out-File "$StartupFolder\UserStartup.bat" -Encoding ascii
           
-          Write-Host "Installation and Shortcuts Complete."
+          Write-Host "Installation Complete."
 
       - name: Setup Cloud Backup & Restore Session
         env:
@@ -344,11 +306,11 @@ jobs:
               Write-Host "No backup remote configured. Skipping final backup."
           }
 
-      - name: ðŸ”„ Auto-Restart Server
+      - name: 🔄 Auto-Restart Server
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           Write-Host "Triggering next workflow run to restart the server..."
           gh workflow run rdp_workflow.yml --repo ${{ github.repository }} --ref ${{ github.ref_name }}
-          Write-Host "âœ… Restart triggered successfully!"
+          Write-Host "✅ Restart triggered successfully!"
