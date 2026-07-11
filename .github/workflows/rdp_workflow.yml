@@ -108,7 +108,7 @@ jobs:
               Copy-Item -Path $CapLoc2 -Destination "C:\Captura" -Recurse -Force
           }
           
-          # 5. Create Desktop Shortcuts
+          # 5. Create Desktop Shortcuts & The Instant Restart Button
           $WshShell = New-Object -comObject WScript.Shell
           
           $BraveLnk = $WshShell.CreateShortcut("C:\Users\Public\Desktop\Brave.lnk")
@@ -127,6 +127,24 @@ jobs:
               $RarLnk.TargetPath = "C:\Program Files (x86)\WinRAR\WinRAR.exe"
           }
           $RarLnk.Save()
+
+          # --- INSTANT RESTART BUTTON (Self-Elevating Process Killer) ---
+          $RestartBat = @'
+          @echo off
+          net session >nul 2>&1
+          if %errorLevel% NEQ 0 (
+              powershell -Command "Start-Process '%~f0' -Verb RunAs"
+              exit /b
+          )
+          echo =======================================================
+          echo Initiating Instant Backup and Server Restart...
+          echo =======================================================
+          taskkill /F /IM WorkflowTimer.exe >nul 2>&1
+          echo The server will now begin backing up your files and restart.
+          echo You can safely close your Remote Desktop app now!
+          timeout /t 5 >nul
+          '@
+          $RestartBat | Out-File "C:\Users\Public\Desktop\Instant-Restart.bat" -Encoding ascii
 
           # 6. Create Auto-Startup Script for RDP User
           Write-Host "Setting up User Startup script (Dark Mode, Wallpaper)..."
@@ -278,16 +296,21 @@ jobs:
           Write-Host "Connect via the public hostname you configured in your Cloudflare Zero Trust dashboard."
           Write-Host "==================`n"
           
-          # Timer setup: Run for exactly 345 minutes (5 hours 45 minutes)
-          $endTime = (Get-Date).AddMinutes(345)
-          Write-Host "Runner will stay active until $endTime"
-
-          while ((Get-Date) -lt $endTime) {
-              Write-Host "[$(Get-Date)] RDP Active via Cloudflare - Cancel workflow to terminate early"
-              Start-Sleep -Seconds 60
-          }
+          # --- ZERO-CPU PROCESS ANCHOR METHOD ---
+          Write-Host "Starting 345-minute zero-CPU tether..."
           
-          Write-Host "Time limit reached (5 hours 45 mins). Proceeding to shutdown & backup..."
+          # Copy the built-in timeout utility to create a unique process name
+          Copy-Item "C:\Windows\System32\timeout.exe" "C:\Windows\System32\WorkflowTimer.exe" -Force
+          
+          # Start the hidden 345-minute (20700 seconds) timer process
+          Start-Process -FilePath "C:\Windows\System32\WorkflowTimer.exe" -ArgumentList "/t 20700 /nobreak" -WindowStyle Hidden
+          
+          Write-Host "[$(Get-Date)] RDP Active. Run 'Instant-Restart.bat' on your desktop to trigger backup & restart instantly."
+          
+          # Put the workflow into a completely zero-CPU hibernation until the anchor dies
+          Wait-Process -Name "WorkflowTimer" -ErrorAction SilentlyContinue
+          
+          Write-Host "Time limit reached or manually interrupted via Instant-Restart.bat. Proceeding to shutdown & backup..."
 
       - name: Final Cloud Backup
         if: always()
