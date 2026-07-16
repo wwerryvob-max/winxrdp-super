@@ -31,11 +31,11 @@ jobs:
 
           # Enable Remote Desktop and disable Network Level Authentication
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
+                               -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
+                               -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
+                               -Name "SecurityLayer" -Value 0 -Force
 
           # Remove existing rule, then allow incoming RDP connections
           netsh advfirewall firewall delete rule name="RDP-Tunnel"
@@ -70,16 +70,8 @@ jobs:
         run: |
           Write-Host "Installing Apps..."
           
-          # 1. Install via Chocolatey
-          choco install vb-cable -y --no-progress --ignore-checksums
-          choco install winrar -y --no-progress
-          choco install googlechrome -y --no-progress --ignore-checksums
-          choco install brave -y --no-progress
-          choco install ffmpeg -y --no-progress
-          choco install captura -y --no-progress
-          choco install irfanview -y --no-progress
-          choco install irfanviewplugins -y --no-progress
-          choco install vlc -y --no-progress
+          # 1. Install all apps via Chocolatey in a single batch to save initialization time
+          choco install vb-cable winrar googlechrome brave ffmpeg captura irfanview irfanviewplugins vlc -y --no-progress --ignore-checksums
           
           # 2. FIX IMAGE VIEWER FOR ALL USERS (Force IrfanView instead of Paint)
           $IrfanPath = "C:\Program Files\IrfanView\i_view64.exe"
@@ -240,27 +232,27 @@ jobs:
               # Firefox
               $FFDest = "$UserProfile\AppData\Roaming\Mozilla"
               New-Item -ItemType Directory -Force -Path $FFDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/Mozilla" $FFDest --exclude ".cache/**" | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/Mozilla" $FFDest --exclude ".cache/**" --transfers 16 --checkers 16 | Out-Null
 
               # Chrome
               $ChromeDest = "$UserProfile\AppData\Local\Google\Chrome\User Data"
               New-Item -ItemType Directory -Force -Path $ChromeDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/ChromeUserData" $ChromeDest --exclude "Cache/**" --exclude "Code Cache/**" | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/ChromeUserData" $ChromeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 | Out-Null
 
               # Brave
               $BraveDest = "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data"
               New-Item -ItemType Directory -Force -Path $BraveDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/BraveUserData" $BraveDest --exclude "Cache/**" --exclude "Code Cache/**" | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/BraveUserData" $BraveDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 | Out-Null
 
               # Edge
               $EdgeDest = "$UserProfile\AppData\Local\Microsoft\Edge\User Data"
               New-Item -ItemType Directory -Force -Path $EdgeDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/EdgeUserData" $EdgeDest --exclude "Cache/**" --exclude "Code Cache/**" | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/EdgeUserData" $EdgeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 | Out-Null
 
               # SavedFiles folder
               $SavedFilesDest = "C:\Users\Public\Desktop\SavedFiles"
               New-Item -ItemType Directory -Force -Path $SavedFilesDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/SavedFiles" $SavedFilesDest | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/SavedFiles" $SavedFilesDest --transfers 16 --checkers 16 | Out-Null
 
               Write-Host "Restore complete!"
           }
@@ -297,13 +289,13 @@ jobs:
           Write-Host "==================`n"
           
           # --- ZERO-CPU PROCESS ANCHOR METHOD ---
-          Write-Host "Starting 345-minute zero-CPU tether..."
+          Write-Host "Starting 330-minute zero-CPU tether..."
           
           # Copy the built-in timeout utility to create a unique process name
           Copy-Item "C:\Windows\System32\timeout.exe" "C:\Windows\System32\WorkflowTimer.exe" -Force
           
-          # Start the hidden 345-minute (20700 seconds) timer process
-          Start-Process -FilePath "C:\Windows\System32\WorkflowTimer.exe" -ArgumentList "/t 20700 /nobreak" -WindowStyle Hidden
+          # Start the hidden 330-minute (19800 seconds) timer process
+          Start-Process -FilePath "C:\Windows\System32\WorkflowTimer.exe" -ArgumentList "/t 19800 /nobreak" -WindowStyle Hidden
           
           Write-Host "[$(Get-Date)] RDP Active. Run 'Instant-Restart.bat' on your desktop to trigger backup & restart instantly."
           
@@ -324,11 +316,11 @@ jobs:
 
               Write-Host "Performing final backup to $($env:BACKUP_REMOTE)..."
               $UserProfile = "C:\Users\RDP"
-              rclone sync "$UserProfile\AppData\Roaming\Mozilla" "$($env:BACKUP_REMOTE):winrdp-backup/Mozilla" --exclude ".cache/**"
-              rclone sync "$UserProfile\AppData\Local\Google\Chrome\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/ChromeUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-              rclone sync "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/BraveUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-              rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**"
-              rclone sync "C:\Users\Public\Desktop\SavedFiles" "$($env:BACKUP_REMOTE):winrdp-backup/SavedFiles"
+              rclone sync "$UserProfile\AppData\Roaming\Mozilla" "$($env:BACKUP_REMOTE):winrdp-backup/Mozilla" --exclude ".cache/**" --transfers 16 --checkers 16
+              rclone sync "$UserProfile\AppData\Local\Google\Chrome\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/ChromeUserData" --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16
+              rclone sync "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/BraveUserData" --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16
+              rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16
+              rclone sync "C:\Users\Public\Desktop\SavedFiles" "$($env:BACKUP_REMOTE):winrdp-backup/SavedFiles" --transfers 16 --checkers 16
               Write-Host "Final backup complete."
           } else {
               Write-Host "No backup remote configured. Skipping final backup."
