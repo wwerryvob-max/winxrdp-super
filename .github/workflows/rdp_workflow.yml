@@ -225,10 +225,10 @@ jobs:
               Copy-Item "C:\Users\runneradmin\AppData\Roaming\rclone\rclone.conf" "C:\Users\Public\rclone.conf" -Force
 
               Write-Host "Ensuring remote directories exist on $BackupRemote..."
-              rclone mkdir "${BackupRemote}:winrdp-backup/Mozilla" 2>&1 | Out-Null
-              rclone mkdir "${BackupRemote}:winrdp-backup/ChromeUserData" 2>&1 | Out-Null
-              rclone mkdir "${BackupRemote}:winrdp-backup/BraveUserData" 2>&1 | Out-Null
-              rclone mkdir "${BackupRemote}:winrdp-backup/EdgeUserData" 2>&1 | Out-Null
+              rclone mkdir "${BackupRemote}:winrdp-backup/Mozilla" -q
+              rclone mkdir "${BackupRemote}:winrdp-backup/ChromeUserData" -q
+              rclone mkdir "${BackupRemote}:winrdp-backup/BraveUserData" -q
+              rclone mkdir "${BackupRemote}:winrdp-backup/EdgeUserData" -q
 
               Write-Host "Restoring browser profiles and SavedFiles from $BackupRemote..."
 
@@ -238,27 +238,27 @@ jobs:
               # Firefox
               $FFDest = "$UserProfile\AppData\Roaming\Mozilla"
               New-Item -ItemType Directory -Force -Path $FFDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/Mozilla" $FFDest --exclude ".cache/**" --transfers 16 --checkers 16 2>&1 | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/Mozilla" $FFDest --exclude ".cache/**" --transfers 16 --checkers 16 -q
 
               # Chrome
               $ChromeDest = "$UserProfile\AppData\Local\Google\Chrome\User Data"
               New-Item -ItemType Directory -Force -Path $ChromeDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/ChromeUserData" $ChromeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 2>&1 | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/ChromeUserData" $ChromeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 -q
 
               # Brave
               $BraveDest = "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data"
               New-Item -ItemType Directory -Force -Path $BraveDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/BraveUserData" $BraveDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 2>&1 | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/BraveUserData" $BraveDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 -q
 
               # Edge
               $EdgeDest = "$UserProfile\AppData\Local\Microsoft\Edge\User Data"
               New-Item -ItemType Directory -Force -Path $EdgeDest | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/EdgeUserData" $EdgeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 2>&1 | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/EdgeUserData" $EdgeDest --exclude "Cache/**" --exclude "Code Cache/**" --transfers 16 --checkers 16 -q
 
               # SavedFiles folder (Archive logic)
               $SavedFilesDest = "C:\Users\Public\Desktop\SavedFiles"
               New-Item -ItemType Directory -Force -Path "C:\TempZips" | Out-Null
-              rclone copy "${BackupRemote}:winrdp-backup/SavedFiles.zip" "C:\TempZips" 2>&1 | Out-Null
+              rclone copy "${BackupRemote}:winrdp-backup/SavedFiles.zip" "C:\TempZips" -q
               
               if (Test-Path "C:\TempZips\SavedFiles.zip") {
                   Write-Host "Extracting zipped SavedFiles archive..."
@@ -267,7 +267,7 @@ jobs:
               } else {
                   Write-Host "No archive found. Restoring unzipped legacy SavedFiles..."
                   New-Item -ItemType Directory -Force -Path $SavedFilesDest | Out-Null
-                  rclone copy "${BackupRemote}:winrdp-backup/SavedFiles" $SavedFilesDest --transfers 16 --checkers 16 2>&1 | Out-Null
+                  rclone copy "${BackupRemote}:winrdp-backup/SavedFiles" $SavedFilesDest --transfers 16 --checkers 16 -q
               }
 
               Write-Host "Restore complete!"
@@ -374,10 +374,10 @@ jobs:
               Write-Host "Performing final backup to $($env:BACKUP_REMOTE)..."
               $UserProfile = "C:\Users\RDP"
               
-              if (Test-Path "$UserProfile\AppData\Roaming\Mozilla") { rclone sync "$UserProfile\AppData\Roaming\Mozilla" "$($env:BACKUP_REMOTE):winrdp-backup/Mozilla" --exclude ".cache/**" 2>&1 | Out-Null }
-              if (Test-Path "$UserProfile\AppData\Local\Google\Chrome\User Data") { rclone sync "$UserProfile\AppData\Local\Google\Chrome\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/ChromeUserData" --exclude "Cache/**" --exclude "Code Cache/**" 2>&1 | Out-Null }
-              if (Test-Path "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data") { rclone sync "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/BraveUserData" --exclude "Cache/**" --exclude "Code Cache/**" 2>&1 | Out-Null }
-              if (Test-Path "$UserProfile\AppData\Local\Microsoft\Edge\User Data") { rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**" 2>&1 | Out-Null }
+              if (Test-Path "$UserProfile\AppData\Roaming\Mozilla") { rclone sync "$UserProfile\AppData\Roaming\Mozilla" "$($env:BACKUP_REMOTE):winrdp-backup/Mozilla" --exclude ".cache/**" -q }
+              if (Test-Path "$UserProfile\AppData\Local\Google\Chrome\User Data") { rclone sync "$UserProfile\AppData\Local\Google\Chrome\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/ChromeUserData" --exclude "Cache/**" --exclude "Code Cache/**" -q }
+              if (Test-Path "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data") { rclone sync "$UserProfile\AppData\Local\BraveSoftware\Brave-Browser\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/BraveUserData" --exclude "Cache/**" --exclude "Code Cache/**" -q }
+              if (Test-Path "$UserProfile\AppData\Local\Microsoft\Edge\User Data") { rclone sync "$UserProfile\AppData\Local\Microsoft\Edge\User Data" "$($env:BACKUP_REMOTE):winrdp-backup/EdgeUserData" --exclude "Cache/**" --exclude "Code Cache/**" -q }
               
               Write-Host "Archiving SavedFiles for fast upload..."
               $TempZips = "C:\TempZips"
@@ -385,7 +385,7 @@ jobs:
               if (Test-Path "$TempZips\SavedFiles.zip") { Remove-Item "$TempZips\SavedFiles.zip" -Force }
               if (Test-Path "C:\Users\Public\Desktop\SavedFiles") { 
                   7z a -tzip -mx0 -ssw "$TempZips\SavedFiles.zip" "C:\Users\Public\Desktop\SavedFiles\*" | Out-Null 
-                  rclone copy "$TempZips\SavedFiles.zip" "$($env:BACKUP_REMOTE):winrdp-backup/" 2>&1 | Out-Null
+                  rclone copy "$TempZips\SavedFiles.zip" "$($env:BACKUP_REMOTE):winrdp-backup/" -q
               }
               
               Write-Host "Final backup complete."
